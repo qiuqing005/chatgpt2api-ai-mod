@@ -1,5 +1,15 @@
 <h1 align="center">ChatGPT2API</h1>
 
+> [!IMPORTANT]
+> This repository is an AI-modified redistribution of `basketikun/chatgpt2api`.
+> The AI-assisted changes are documented in [AI_MODIFICATIONS.md](AI_MODIFICATIONS.md).
+> It is not the original upstream project; review the modification notes and upstream license before use.
+
+> [!IMPORTANT]
+> 本仓库是基于 `basketikun/chatgpt2api` 的 AI 修改版再发布。
+> AI 辅助修改内容记录在 [AI_MODIFICATIONS.md](AI_MODIFICATIONS.md)。
+> 这不是原始上游项目；使用前请先阅读修改说明和上游许可证。
+
 
 <p align="center">ChatGPT2API 主要是对 ChatGPT 官网相关能力进行逆向整理与封装，提供面向 ChatGPT 图片生成、图片编辑、多图组图编辑场景的 OpenAI 兼容图片 API / 代理，并集成在线画图、号池管理、多种账号导入方式与 Docker 自托管部署能力。</p>
 
@@ -20,12 +30,14 @@
 ### Docker 运行
 
 ```bash
-git clone git@github.com:basketikun/chatgpt2api.git
-cd chatgpt2api
-docker compose up -d
+git clone https://github.com/qiuqing005/chatgpt2api-ai-mod.git
+cd chatgpt2api-ai-mod
+cp config.example.json config.json
+# edit config.json and set auth-key
+docker compose up -d --build
 ```
 
-启动前请先在 `config.json` 中设置 `auth-key`，也可以在 `docker-compose.yml` 中通过 `CHATGPT2API_AUTH_KEY` 覆盖。
+启动前请先复制 `config.example.json` 为 `config.json` 并设置 `auth-key`，也可以在 `docker-compose.yml` 中通过 `CHATGPT2API_AUTH_KEY` 覆盖。
 
 - Web 面板：`http://localhost:3000`
 - API 地址：`http://localhost:3000/v1`
@@ -57,8 +69,10 @@ docker compose -f docker-compose.warp.yml up -d --build
 启动后端：
 
 ```bash
-git clone git@github.com:basketikun/chatgpt2api.git
-cd chatgpt2api
+git clone https://github.com/qiuqing005/chatgpt2api-ai-mod.git
+cd chatgpt2api-ai-mod
+cp config.example.json config.json
+# edit config.json and set auth-key
 uv sync
 uv run main.py
 ```
@@ -66,7 +80,7 @@ uv run main.py
 启动前端：
 
 ```bash
-cd chatgpt2api/web
+cd chatgpt2api-ai-mod/web
 bun install
 bun run dev
 ```
@@ -74,9 +88,10 @@ bun run dev
 后续更新新版本：
 
 ```bash
-docker pull ghcr.io/basketikun/chatgpt2api:latest
-docker-compose down
-docker-compose up -d
+git pull
+docker compose build --pull
+docker compose down
+docker compose up -d
 
 ```
 
@@ -107,6 +122,7 @@ environment:
 - 兼容面向图片场景的 `POST /v1/responses`
 - `GET /v1/models` 返回 `gpt-image-2`、`codex-gpt-image-2`、`auto`、`gpt-5`、`gpt-5-1`、`gpt-5-2`、`gpt-5-3`、`gpt-5-3-mini`、
   `gpt-5-mini`
+- AI 修改版中，`gpt-image-2` 仅在存在非 Codex Web 账号时公开暴露；`gpt-image-2-low` / `medium` / `high` / `xhigh` 只作为隐藏后缀参与后台映射，详见 [AI_MODIFICATIONS.md](AI_MODIFICATIONS.md)
 - 支持通过 `n` 返回多张生成结果
 - 支持生成可编辑 PPT 文件
 - 支持生成可编辑 PSD 文件
@@ -348,14 +364,14 @@ curl http://localhost:8000/v1/responses \
 
 学 AI , 上 L 站：[LinuxDO](https://linux.do)
 
-## Contributors
+## Upstream Contributors
 
-感谢所有为本项目做出贡献的开发者：
+感谢所有为上游项目做出贡献的开发者：
 
 <a href="https://github.com/basketikun/chatgpt2api/graphs/contributors">
   <img alt="Contributors" src="https://contrib.rocks/image?repo=basketikun/chatgpt2api" />
 </a>
 
-## Star History
+## Upstream Star History
 
 [![Star History Chart](https://api.star-history.com/chart?repos=basketikun/chatgpt2api&type=date&legend=top-left)](https://www.star-history.com/?repos=basketikun%2Fchatgpt2api&type=date&legend=top-left)

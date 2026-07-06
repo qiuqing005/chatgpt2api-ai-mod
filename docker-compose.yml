@@ -1,6 +1,7 @@
 services:
   app:
-    image: ghcr.io/basketikun/chatgpt2api:latest
+    build: .
+    image: chatgpt2api-ai-mod:latest
     container_name: chatgpt2api
     restart: unless-stopped
     ports:

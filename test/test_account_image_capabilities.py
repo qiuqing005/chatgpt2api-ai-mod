@@ -13,7 +13,7 @@ from services.auth_service import AuthService
 from services.config import config
 from services.openai_backend_api import InvalidAccessTokenError
 from services.storage.json_storage import JSONStorageBackend
-from utils.helper import anonymize_token, split_image_model
+from utils.helper import anonymize_token, image_model_thinking_effort, image_model_uses_thinking, split_image_model
 
 
 class AccountCapabilityTests(unittest.TestCase):
@@ -75,6 +75,33 @@ class AccountCapabilityTests(unittest.TestCase):
         self.assertEqual(split_image_model("pro-codex-gpt-image-2"), ("pro", "codex-gpt-image-2"))
         self.assertEqual(split_image_model("plus-gpt-image-2"), (None, None))
         self.assertEqual(split_image_model("unknown-image-model"), (None, None))
+
+    def test_gpt_image_thinking_suffixes_are_hidden_supported_aliases(self) -> None:
+        expected_efforts = {
+            "gpt-image-2-low": "min",
+            "gpt-image-2-medium": "standard",
+            "gpt-image-2-high": "extended",
+            "gpt-image-2-xhigh": "max",
+        }
+        for model, effort in expected_efforts.items():
+            with self.subTest(model=model):
+                self.assertEqual(split_image_model(model), (None, "gpt-image-2"))
+                self.assertEqual(image_model_thinking_effort(model), effort)
+                self.assertTrue(image_model_uses_thinking(model))
+
+        self.assertEqual(image_model_thinking_effort("gpt-image-2"), "")
+        self.assertFalse(image_model_uses_thinking("gpt-image-2"))
+
+    def test_gpt_image_raw_thinking_effort_aliases_are_not_supported(self) -> None:
+        for model in (
+            "gpt-image-2-min",
+            "gpt-image-2-standard",
+            "gpt-image-2-extended",
+            "gpt-image-2-max",
+        ):
+            with self.subTest(model=model):
+                self.assertEqual(split_image_model(model), (None, None))
+                self.assertEqual(image_model_thinking_effort(model), "")
 
     def test_get_available_access_token_filters_by_plan_type(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

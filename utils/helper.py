@@ -14,9 +14,20 @@ from fastapi import HTTPException
 from services.proxy_service import proxy_settings
 from utils.log import logger
 
-BASE_IMAGE_MODELS = {"gpt-image-2", "codex-gpt-image-2"}
+GPT_IMAGE_MODEL = "gpt-image-2"
+BASE_IMAGE_MODELS = {GPT_IMAGE_MODEL, "codex-gpt-image-2"}
 IMAGE_MODEL_PLAN_TYPES = ("plus", "team", "pro")
 CODEX_IMAGE_MODEL = "codex-gpt-image-2"
+GPT_IMAGE_THINKING_EFFORTS = {
+    "low": "min",
+    "medium": "standard",
+    "high": "extended",
+    "xhigh": "max",
+}
+GPT_IMAGE_THINKING_MODELS = {
+    f"{GPT_IMAGE_MODEL}-{suffix}"
+    for suffix in GPT_IMAGE_THINKING_EFFORTS
+}
 PREFIXED_CODEX_IMAGE_MODELS = {
     f"{plan_type}-{CODEX_IMAGE_MODEL}"
     for plan_type in IMAGE_MODEL_PLAN_TYPES
@@ -112,6 +123,8 @@ def split_image_model(model: object) -> tuple[str | None, str | None]:
         return None, None
     if normalized in BASE_IMAGE_MODELS:
         return None, normalized
+    if normalized in GPT_IMAGE_THINKING_MODELS:
+        return None, GPT_IMAGE_MODEL
     for plan_type in IMAGE_MODEL_PLAN_TYPES:
         prefix = f"{plan_type}-"
         if normalized.startswith(prefix):
@@ -119,6 +132,19 @@ def split_image_model(model: object) -> tuple[str | None, str | None]:
             if base_model == CODEX_IMAGE_MODEL:
                 return plan_type, base_model
     return None, None
+
+
+def image_model_thinking_effort(model: object) -> str:
+    normalized = str(model or "").strip().lower()
+    prefix = f"{GPT_IMAGE_MODEL}-"
+    if normalized.startswith(prefix):
+        suffix = normalized[len(prefix):]
+        return GPT_IMAGE_THINKING_EFFORTS.get(suffix, "")
+    return ""
+
+
+def image_model_uses_thinking(model: object) -> bool:
+    return bool(image_model_thinking_effort(model))
 
 
 def is_supported_image_model(model: object) -> bool:

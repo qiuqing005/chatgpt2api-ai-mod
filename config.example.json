@@ -1,5 +1,5 @@
 {
-  "auth-key": "chatgpt2api",
+  "auth-key": "",
   "refresh_account_interval_minute": 5,
   "image_retention_days": 15,
   "image_poll_timeout_secs": 120,
@@ -47,9 +47,9 @@
   "backup": {
     "enabled": false,
     "provider": "cloudflare_r2",
-    "account_id": "admin",
+    "account_id": "",
     "access_key_id": "",
-    "secret_access_key": "admin",
+    "secret_access_key": "",
     "bucket": "",
     "prefix": "backups",
     "interval_minutes": 1440,

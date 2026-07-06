@@ -22,7 +22,7 @@ git --version
 
 | 路径 | 作用 |
 | --- | --- |
-| `config.json` | 主配置、后台密钥、代理、图片、备份等配置 |
+| `config.json` | 主配置、后台密钥、代理、图片、备份等配置；从 `config.example.json` 复制生成，不提交真实运行配置 |
 | `.env` | Docker compose 环境变量 |
 | `data/` | 账号、日志、图片、任务记录等运行数据 |
 
@@ -33,11 +33,16 @@ git --version
 适合不需要 WARP / FlareSolverr 清障的场景。
 
 ```bash
-git clone git@github.com:basketikun/chatgpt2api.git
-cd chatgpt2api
+git clone https://github.com/qiuqing005/chatgpt2api-ai-mod.git
+cd chatgpt2api-ai-mod
 ```
 
-设置 `config.json` 中的 `auth-key`，或在 `docker-compose.yml` 中配置：
+复制配置模板并设置 `auth-key`，或在 `docker-compose.yml` 中配置：
+
+```bash
+cp config.example.json config.json
+# edit config.json and set auth-key
+```
 
 ```yaml
 environment:
@@ -136,8 +141,10 @@ docker compose -f docker-compose.warp.yml down
 后端：
 
 ```bash
-git clone git@github.com:basketikun/chatgpt2api.git
-cd chatgpt2api
+git clone https://github.com/qiuqing005/chatgpt2api-ai-mod.git
+cd chatgpt2api-ai-mod
+cp config.example.json config.json
+# edit config.json and set auth-key
 uv sync
 uv run main.py
 ```

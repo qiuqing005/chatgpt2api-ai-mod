@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
 import unittest
 from unittest import mock
 import json
 import base64
+
+os.environ.setdefault("CHATGPT2API_AUTH_KEY", "test-auth")
 
 from services.config import config
 from services.protocol import openai_v1_chat_complete, openai_v1_response

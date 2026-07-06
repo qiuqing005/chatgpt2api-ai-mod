@@ -22,14 +22,20 @@ def list_models() -> dict[str, Any]:
     web_image_accounts = [
         account
         for account in accounts
-        if isinstance(account, dict)
+        if (
+            isinstance(account, dict)
+            and account.get("access_token")
+            and account_service._normalize_source_type(account.get("source_type")) != "codex"
+        )
     ]
     codex_types = {
         normalized
         for account in accounts
-        if isinstance(account, dict)
-           and account_service._normalize_source_type(account.get("source_type")) == "codex"
-           and (normalized := account_service._normalize_account_type(account.get("type")))
+        if (
+            isinstance(account, dict)
+            and account_service._normalize_source_type(account.get("source_type")) == "codex"
+            and (normalized := account_service._normalize_account_type(account.get("type")))
+        )
     }
 
     if web_image_accounts:
