@@ -125,7 +125,8 @@ environment:
 - `GET /v1/models` 返回 `gpt-image-2`、`codex-gpt-image-2`、`auto`、`gpt-5`、`gpt-5-1`、`gpt-5-2`、`gpt-5-3`、`gpt-5-3-mini`、
   `gpt-5-mini`
 - AI 修改版中，`gpt-image-2` 仅在存在非 Codex Web 账号时公开暴露；`gpt-image-2-low` / `medium` / `high` / `xhigh` 只作为隐藏后缀参与后台映射，详见 [AI_MODIFICATIONS.md](AI_MODIFICATIONS.md)
-- 支持通过 `n` 返回多张生成结果
+- AI 修改的部分仅为web端反代，`gpt-image-2`现在可以在后面添加`-low` / `-medium` / `-high` / `-xhigh` 以使用 `gpt-5-5-思考强度`+`images` 工具，`high` 可以有效提高出图概率，但无法真正的绕过审查，也有可能降低生图模型的准确性
+- 支持通过 `n` 返回多张生成结果 
 - 支持生成可编辑 PPT 文件
 - 支持生成可编辑 PSD 文件
 - 支持 Codex 中的画图接口逆向，仅 `Plus` / `Team` / `Pro` 订阅可用，模型别名为 `codex-gpt-image-2`，如有需要可自行在其他场景映射回
