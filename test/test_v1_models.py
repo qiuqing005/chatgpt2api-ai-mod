@@ -9,12 +9,24 @@ import requests
 
 os.environ.setdefault("CHATGPT2API_AUTH_KEY", "test-auth")
 
-from services.openai_backend_api import OpenAIBackendAPI
+from services.openai_backend_api import ChatRequirements, OpenAIBackendAPI
 from services.protocol import openai_v1_models
 
 
 AUTH_KEY = "chatgpt2api"
 BASE_URL = "http://localhost:8000"
+
+
+class FakeResponse:
+    status_code = 200
+    text = ""
+    headers: dict[str, str] = {}
+
+    def __init__(self, body: dict | None = None) -> None:
+        self.body = body or {}
+
+    def json(self) -> dict:
+        return self.body
 
 
 class ModelListTests(unittest.TestCase):
@@ -80,6 +92,32 @@ class ModelListTests(unittest.TestCase):
             self.assertEqual(backend._image_model_slug("gpt-image-2-xhigh"), "gpt-5-5-thinking")
         finally:
             backend.close()
+
+    def test_gpt_image_hidden_suffixes_send_thinking_effort_payload(self):
+        backend = OpenAIBackendAPI()
+        payloads: list[dict] = []
+
+        def fake_post(*args, **kwargs):
+            payloads.append(kwargs["json"])
+            if str(args[0]).endswith("/backend-api/f/conversation/prepare"):
+                return FakeResponse({"conduit_token": "ct-1"})
+            return FakeResponse()
+
+        try:
+            with mock.patch.object(backend.session, "post", side_effect=fake_post):
+                requirements = ChatRequirements(token="requirements-token")
+                self.assertEqual(
+                    backend._prepare_image_conversation("draw", requirements, "gpt-image-2-high"),
+                    "ct-1",
+                )
+                backend._start_image_generation("draw", requirements, "ct-1", "gpt-image-2-high")
+        finally:
+            backend.close()
+
+        self.assertEqual(payloads[0]["model"], "gpt-5-5-thinking")
+        self.assertEqual(payloads[0]["thinking_effort"], "extended")
+        self.assertEqual(payloads[1]["model"], "gpt-5-5-thinking")
+        self.assertEqual(payloads[1]["thinking_effort"], "extended")
 
     def test_list_models_function(self):
         """测试直接调用服务层获取模型列表。"""

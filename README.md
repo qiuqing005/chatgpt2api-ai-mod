@@ -48,6 +48,8 @@ docker compose up -d --build
 如果图片链路经常遇到 Cloudflare 拦截，可以启用附带的 WARP + Privoxy + FlareSolverr 方案：
 
 ```bash
+cp config.example.json config.json
+# edit config.json and set auth-key
 cp .env.example .env
 docker compose -f docker-compose.warp.yml up -d --build
 ```

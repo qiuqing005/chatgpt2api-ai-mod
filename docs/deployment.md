@@ -89,13 +89,15 @@ docker compose down
 - `init-config`
 - `app`
 
-复制环境变量模板：
+复制配置和环境变量模板：
 
 ```bash
+cp config.example.json config.json
+# edit config.json and set auth-key
 cp .env.example .env
 ```
 
-至少修改 `.env` 中的：
+如需通过环境变量覆盖认证密钥，至少修改 `.env` 中的：
 
 ```text
 CHATGPT2API_AUTH_KEY=your_secret_key_here
@@ -214,7 +216,7 @@ tar -czf backups/chatgpt2api-$(date +%Y%m%d-%H%M%S).tgz config.json data
 进入项目目录：
 
 ```bash
-cd chatgpt2api
+cd chatgpt2api-ai-mod
 ```
 
 备份：
@@ -224,11 +226,11 @@ mkdir -p backups
 tar -czf backups/chatgpt2api-$(date +%Y%m%d-%H%M%S).tgz config.json .env data
 ```
 
-拉取最新代码和镜像：
+拉取最新代码并重新构建本地镜像：
 
 ```bash
 git pull
-docker compose pull
+docker compose build --pull
 docker compose up -d
 ```
 
@@ -244,7 +246,7 @@ docker logs -f chatgpt2api
 进入项目目录：
 
 ```bash
-cd chatgpt2api
+cd chatgpt2api-ai-mod
 ```
 
 备份：
@@ -271,7 +273,7 @@ docker logs -f chatgpt2api-warp
 ## 升级：源码运行
 
 ```bash
-cd chatgpt2api
+cd chatgpt2api-ai-mod
 git pull
 uv sync
 ```
