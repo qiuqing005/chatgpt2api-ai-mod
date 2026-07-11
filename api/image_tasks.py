@@ -6,13 +6,18 @@ from pydantic import BaseModel, Field
 
 from api.image_inputs import parse_image_edit_request, read_image_sources
 from api.support import require_identity, resolve_image_base_url
+from services.auth_service import ImageQuotaExceeded
 from services.content_filter import check_request
-from services.image_task_service import image_task_service
+from services.image_task_service import (
+    MAX_CLIENT_TASK_ID_LENGTH,
+    ImageTaskQueueUnavailable,
+    image_task_service,
+)
 from services.log_service import LoggedCall
 
 
 class ImageGenerationTaskRequest(BaseModel):
-    client_task_id: str = Field(..., min_length=1)
+    client_task_id: str = Field(..., min_length=1, max_length=MAX_CLIENT_TASK_ID_LENGTH)
     prompt: str = Field(..., min_length=1)
     model: str = "gpt-image-2"
     size: str | None = None
@@ -65,8 +70,12 @@ def create_router() -> APIRouter:
                 quality=body.quality,
                 base_url=resolve_image_base_url(request),
             )
+        except ImageQuotaExceeded as exc:
+            raise HTTPException(status_code=429, detail={"error": str(exc)}) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        except ImageTaskQueueUnavailable as exc:
+            raise HTTPException(status_code=503, detail={"error": str(exc)}) from exc
 
     @router.post("/api/image-tasks/edits")
     async def create_edit_task(
@@ -78,6 +87,11 @@ def create_router() -> APIRouter:
         client_task_id = str(payload.get("client_task_id") or "").strip()
         if not client_task_id:
             raise HTTPException(status_code=400, detail={"error": "client_task_id is required"})
+        if len(client_task_id) > MAX_CLIENT_TASK_ID_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": f"client_task_id must not exceed {MAX_CLIENT_TASK_ID_LENGTH} characters"},
+            )
         prompt = str(payload["prompt"])
         model = str(payload["model"])
         await filter_or_log(LoggedCall(identity, "/api/image-tasks/edits", model, "图生图任务", request_text=prompt), prompt)
@@ -96,8 +110,12 @@ def create_router() -> APIRouter:
                 images=images,
                 masks=masks,
             )
+        except ImageQuotaExceeded as exc:
+            raise HTTPException(status_code=429, detail={"error": str(exc)}) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        except ImageTaskQueueUnavailable as exc:
+            raise HTTPException(status_code=503, detail={"error": str(exc)}) from exc
 
     @router.post("/api/image-tasks/{task_id}/resume-poll")
     async def resume_image_poll(
@@ -116,5 +134,7 @@ def create_router() -> APIRouter:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        except ImageTaskQueueUnavailable as exc:
+            raise HTTPException(status_code=503, detail={"error": str(exc)}) from exc
 
     return router

@@ -16,6 +16,13 @@ export type ImageStorageSettings = {
   public_base_url: string;
 };
 
+export type ImageGenerationSettings = {
+  base_model: string;
+  thinking_model: string;
+  fallback_enabled: boolean;
+  task_workers: number;
+};
+
 export type Account = {
   access_token: string;
   type: AccountType;
@@ -305,6 +312,9 @@ export type LoginResponse = {
   role: AuthRole;
   subject_id: string;
   name: string;
+  image_quota: number;
+  image_used: number;
+  image_remaining: number | null;
 };
 
 export type UserKey = {
@@ -314,6 +324,9 @@ export type UserKey = {
   enabled: boolean;
   created_at: string | null;
   last_used_at: string | null;
+  image_quota: number;
+  image_used: number;
+  image_remaining: number | null;
 };
 
 export async function login(authKey: string) {
@@ -326,6 +339,10 @@ export async function login(authKey: string) {
     },
     redirectOnUnauthorized: false,
   });
+}
+
+export async function fetchAuthProfile() {
+  return httpRequest<LoginResponse>("/auth/me");
 }
 
 export async function fetchAccounts() {
@@ -674,14 +691,30 @@ export async function fetchUserKeys() {
   return httpRequest<{ items: UserKey[] }>("/api/auth/users");
 }
 
-export async function createUserKey(name: string) {
+export async function createUserKey(name: string, imageQuota = 0) {
   return httpRequest<{ item: UserKey; key: string; items: UserKey[] }>("/api/auth/users", {
     method: "POST",
-    body: { name },
+    body: { name, image_quota: imageQuota },
   });
 }
 
-export async function updateUserKey(keyId: string, updates: { enabled?: boolean; name?: string; key?: string }) {
+export async function fetchImageGenerationSettings() {
+  return httpRequest<{ settings: ImageGenerationSettings; model_options: string[] }>(
+    "/api/settings/image-generation",
+  );
+}
+
+export async function updateImageGenerationSettings(settings: ImageGenerationSettings) {
+  return httpRequest<{ settings: ImageGenerationSettings }>("/api/settings/image-generation", {
+    method: "PATCH",
+    body: settings,
+  });
+}
+
+export async function updateUserKey(
+  keyId: string,
+  updates: { enabled?: boolean; name?: string; key?: string; image_quota?: number; image_used?: number },
+) {
   return httpRequest<{ item: UserKey; items: UserKey[] }>(`/api/auth/users/${keyId}`, {
     method: "POST",
     body: updates,

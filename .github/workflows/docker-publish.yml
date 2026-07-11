@@ -10,7 +10,51 @@ env:
   IMAGE_NAME: chatgpt2api
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install backend dependencies
+        run: uv sync --dev --frozen
+
+      - name: Run offline backend tests
+        env:
+          CHATGPT2API_AUTH_KEY: chatgpt2api
+        run: >-
+          uv run pytest -q test
+          --ignore=test/test_v1_chat_completions.py
+          --ignore=test/test_v1_images_edits.py
+          --ignore=test/test_v1_images_generations.py
+          --ignore=test/test_v1_messages.py
+          --ignore=test/test_v1_responses.py
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Type-check frontend
+        working-directory: web
+        run: bunx tsc --noEmit
+
+      - name: Build frontend
+        working-directory: web
+        run: bun run build
+
   docker:
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: read

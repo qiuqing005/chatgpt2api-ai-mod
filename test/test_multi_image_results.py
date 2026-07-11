@@ -9,7 +9,7 @@ os.environ.setdefault("CHATGPT2API_AUTH_KEY", "test-auth")
 
 from services.config import config
 from services.openai_backend_api import OpenAIBackendAPI
-from services.protocol.conversation import ImageOutput, extract_conversation_ids
+from services.protocol.conversation import ImageOutput, _codex_response_images, extract_conversation_ids
 from services.protocol.openai_v1_response import stream_image_response
 
 
@@ -177,6 +177,29 @@ class MultiImageResultTests(unittest.TestCase):
 
         self.assertEqual([event["output_index"] for event in done_events], [0, 1])
         self.assertEqual([item["result"] for item in completed["output"]], [first, second])
+
+    def test_codex_response_images_deduplicate_repeated_sse_items_by_id(self) -> None:
+        events = [
+            {
+                "type": "response.output_item.done",
+                "item": {"id": "ig_1", "type": "image_generation_call", "result": "same"},
+            },
+            {
+                "type": "response.output_item.done",
+                "item": {"id": "ig_2", "type": "image_generation_call", "result": "same"},
+            },
+            {
+                "type": "response.completed",
+                "response": {
+                    "output": [
+                        {"id": "ig_1", "type": "image_generation_call", "result": "same"},
+                        {"id": "ig_2", "type": "image_generation_call", "result": "same"},
+                    ]
+                },
+            },
+        ]
+
+        self.assertEqual(_codex_response_images(events), ["same", "same"])
 
 
 if __name__ == "__main__":

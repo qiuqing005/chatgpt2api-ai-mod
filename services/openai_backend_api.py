@@ -26,7 +26,6 @@ from utils.helper import (
     UpstreamHTTPError,
     ensure_ok,
     image_model_thinking_effort,
-    image_model_uses_thinking,
     iter_sse_payloads,
     new_uuid,
     split_image_model,
@@ -72,6 +71,15 @@ SEARCH_CONVERSATION_ID_RE = re.compile(r'"conversation_id"\s*:\s*"([^"]+)"')
 SEARCH_URL_RE = re.compile(r"https?://[^\s\"'<>）)\]}]+")
 EDITABLE_FILE_MODEL = "gpt-5-5-thinking"
 EDITABLE_FILE_THINKING_EFFORT = "extended"
+
+
+def resolve_image_backend_route(model: str) -> tuple[str, str]:
+    _, base_model = split_image_model(model)
+    thinking_effort = image_model_thinking_effort(model)
+    if base_model == "gpt-image-2":
+        backend_model = config.image_backend_thinking_model if thinking_effort else config.image_backend_model
+        return backend_model, thinking_effort
+    return base_model or "auto", thinking_effort
 EDITABLE_FILE_TIMEOUT_SECS = 1200.0
 EDITABLE_FILE_POLL_INTERVAL_SECS = 5.0
 EDITABLE_FILE_CLIENT_VERSION = "prod-bede35f9dcd856d080e012478f0c1031faa2588e"
@@ -557,14 +565,8 @@ class OpenAIBackendAPI:
 
     def _image_model_slug(self, model: str) -> str:
         """把标准图片模型名映射到底层 model slug。"""
-        _, base_model = split_image_model(model)
-        if not base_model:
-            return "auto"
-        if base_model == "gpt-image-2":
-            return "gpt-5-5-thinking" if image_model_uses_thinking(model) else "gpt-5-5"
-        if base_model == CODEX_IMAGE_MODEL:
-            return base_model
-        return "auto"
+        backend_model, _ = resolve_image_backend_route(model)
+        return backend_model
 
     def _image_headers(self, path: str, requirements: ChatRequirements, conduit_token: str = "", accept: str = "*/*") -> \
             Dict[str, str]:
@@ -850,14 +852,22 @@ class OpenAIBackendAPI:
             retry_after = int(retry_after_header) if str(retry_after_header or "").isdigit() else None
             raise UpstreamHTTPError(path, error.code, body, retry_after=retry_after) from error
 
-    def _prepare_image_conversation(self, prompt: str, requirements: ChatRequirements, model: str) -> str:
+    def _prepare_image_conversation(
+        self,
+        prompt: str,
+        requirements: ChatRequirements,
+        model: str,
+        *,
+        backend_model: str = "",
+        thinking_effort: str | None = None,
+    ) -> str:
         """为图片生成准备 conduit token。"""
         path = "/backend-api/f/conversation/prepare"
         payload = {
             "action": "next",
             "fork_from_shared_post": False,
             "parent_message_id": new_uuid(),
-            "model": self._image_model_slug(model),
+            "model": backend_model or self._image_model_slug(model),
             "client_prepare_state": "success",
             "timezone_offset_min": -480,
             "timezone": "Asia/Shanghai",
@@ -872,9 +882,9 @@ class OpenAIBackendAPI:
             "supported_encodings": ["v1"],
             "client_contextual_info": {"app_name": "chatgpt.com"},
         }
-        thinking_effort = image_model_thinking_effort(model)
-        if thinking_effort:
-            payload["thinking_effort"] = thinking_effort
+        resolved_effort = image_model_thinking_effort(model) if thinking_effort is None else thinking_effort
+        if resolved_effort:
+            payload["thinking_effort"] = resolved_effort
         response = self.session.post(
             self.base_url + path,
             headers=self._image_headers(path, requirements),
@@ -958,8 +968,17 @@ class OpenAIBackendAPI:
             "height": height,
         }
 
-    def _start_image_generation(self, prompt: str, requirements: ChatRequirements, conduit_token: str, model: str,
-                                references: Optional[list[Dict[str, Any]]] = None) -> requests.Response:
+    def _start_image_generation(
+        self,
+        prompt: str,
+        requirements: ChatRequirements,
+        conduit_token: str,
+        model: str,
+        references: Optional[list[Dict[str, Any]]] = None,
+        *,
+        backend_model: str = "",
+        thinking_effort: str | None = None,
+    ) -> requests.Response:
         """启动图片生成或编辑的 SSE 请求。"""
         references = references or []
         parts = [{
@@ -998,7 +1017,7 @@ class OpenAIBackendAPI:
                 "metadata": metadata,
             }],
             "parent_message_id": new_uuid(),
-            "model": self._image_model_slug(model),
+            "model": backend_model or self._image_model_slug(model),
             "client_prepare_state": "sent",
             "timezone_offset_min": -480,
             "timezone": "Asia/Shanghai",
@@ -1020,9 +1039,9 @@ class OpenAIBackendAPI:
             "paragen_cot_summary_display_override": "allow",
             "force_parallel_switch": "auto",
         }
-        thinking_effort = image_model_thinking_effort(model)
-        if thinking_effort:
-            payload["thinking_effort"] = thinking_effort
+        resolved_effort = image_model_thinking_effort(model) if thinking_effort is None else thinking_effort
+        if resolved_effort:
+            payload["thinking_effort"] = resolved_effort
         path = "/backend-api/f/conversation"
         response = self.session.post(
             self.base_url + path,
@@ -2552,10 +2571,18 @@ class OpenAIBackendAPI:
             images: Optional[list[str]] = None,
             system_hints: Optional[list[str]] = None,
             thinking_effort: str = "",
+            image_backend_model: str = "",
+            image_thinking_effort: str | None = None,
     ) -> Iterator[str]:
         system_hints = system_hints or []
         if "picture_v2" in system_hints:
-            yield from self._stream_picture_conversation(prompt, model, images or [])
+            yield from self._stream_picture_conversation(
+                prompt,
+                model,
+                images or [],
+                backend_model=image_backend_model,
+                thinking_effort=image_thinking_effort,
+            )
             return
 
         normalized = messages or [{"role": "user", "content": prompt}]
@@ -2589,6 +2616,9 @@ class OpenAIBackendAPI:
             prompt: str,
             model: str,
             images: list[str],
+            *,
+            backend_model: str = "",
+            thinking_effort: str | None = None,
     ) -> Iterator[str]:
         if not self.access_token:
             raise RuntimeError("access_token is required for image endpoints")
@@ -2598,10 +2628,29 @@ class OpenAIBackendAPI:
         self._bootstrap()
         self._report_progress("getting_token")
         requirements = self._get_chat_requirements()
+        resolved_backend_model, resolved_effort = resolve_image_backend_route(model)
+        if backend_model:
+            resolved_backend_model = backend_model
+        if thinking_effort is not None:
+            resolved_effort = thinking_effort
         self._report_progress("preparing_conversation")
-        conduit_token = self._prepare_image_conversation(prompt, requirements, model)
+        conduit_token = self._prepare_image_conversation(
+            prompt,
+            requirements,
+            model,
+            backend_model=resolved_backend_model,
+            thinking_effort=resolved_effort,
+        )
         self._report_progress("starting_generation")
-        response = self._start_image_generation(prompt, requirements, conduit_token, model, references)
+        response = self._start_image_generation(
+            prompt,
+            requirements,
+            conduit_token,
+            model,
+            references,
+            backend_model=resolved_backend_model,
+            thinking_effort=resolved_effort,
+        )
         self._report_progress("generating")
         try:
             yield from iter_sse_payloads(response)

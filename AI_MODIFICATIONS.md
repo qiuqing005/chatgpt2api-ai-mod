@@ -19,7 +19,7 @@ The default image model remains publicly visible as:
 
 - `gpt-image-2`
 
-Default behavior:
+Default behavior, configurable from the Web settings page:
 
 - `gpt-image-2` maps to the ChatGPT web backend slug `gpt-5-5`
 - No `thinking_effort` parameter is sent for plain `gpt-image-2`
@@ -34,6 +34,28 @@ Hidden suffixes are accepted for backend routing but are not exposed through `/v
 When one of these hidden suffixes is used, the request is routed to:
 
 - `gpt-5-5-thinking`
+
+The ordinary and thinking backend slugs can be changed independently. For example, both can be set to `gpt-5.6-sol`; the hidden suffix still controls whether `thinking_effort` is added.
+
+### Image quota and task queue
+
+- Ordinary user keys can have a bounded image quota; `0` means unlimited.
+- Image quota checks cover Images, Chat Completions image mode, Responses image generation, and Web image tasks.
+- Synchronous and streaming requests use persisted request-scoped reservations, reserve the requested amount first, then atomically settle against the number of image items actually returned. Chat markdown images and Responses `image_generation_call` items are included in that count. Stream settlement retries transient storage failures; abandoned API reservations are recovered on restart or expire after one hour when the next request arrives.
+- Background tasks use a task-derived SHA-256 reservation ID. Reservation, commit, refund, restart recovery, and timeout continuation are idempotent; storage failures reject the request instead of silently granting quota.
+- Failed background tasks refund reserved quota, while resumable timeout tasks retain the reservation until the continuation finishes. Usage resets preserve in-flight reservations, and a finite limit cannot be lowered below the in-flight amount.
+- Background image work uses 1-16 fixed workers and a bounded queue of 16-128 entries instead of creating one thread for every submitted task. A full or closed queue returns HTTP 503 and rolls back the task reservation.
+- The JSON-backed task/quota implementation runs as one application process. A data-directory process lock rejects extra Uvicorn/Gunicorn workers or replicas before they can race the quota and task ledgers.
+- Codex plan-specific image models can fall back to the generic Codex image model only for quota or rate-limit errors. The fallback does not cross into the ChatGPT Web image transport.
+
+### Image size and fallback rules
+
+- Web-backed `gpt-image-2` requests reject 2K/4K-class dimensions with a structured 400 error.
+- Codex image models retain high-resolution support.
+- Content-policy 429 responses do not trigger model fallback.
+- The fallback decision and selected backend model are snapshotted into each queued task so later settings changes cannot alter an in-flight request.
+
+The upstream Sub2API direct-database billing implementation was intentionally not imported because it persisted raw API keys and did not provide crash-safe, idempotent debit/refund semantics.
 
 The following aliases are intentionally not supported:
 
@@ -74,6 +96,25 @@ This redistribution also includes publication-oriented cleanup:
 - `services/openai_backend_api.py`
   - Updated GPT-image-2 backend slug selection.
   - Sends `thinking_effort` only when a hidden suffix requests it.
+  - Reads ordinary and thinking image backend slugs from live configuration.
+
+- `services/auth_service.py`, `services/image_task_service.py`, and `api/ai.py`
+  - Add per-user image quota enforcement across every supported image protocol.
+  - Add persisted idempotent reservations, actual-output settlement, bounded task queues, and resumable timeout accounting.
+
+- `services/log_service.py`
+  - Counts actual image results in Images, Chat Completions markdown, Responses output items, and streaming events before quota settlement.
+
+- `services/process_lock.py`
+  - Enforces the single-process data-directory invariant on Windows and Unix-like hosts.
+
+- `services/protocol/conversation.py`
+  - Adds quota-only fallback within the Codex image transport family.
+  - Keeps 2K/4K-class dimensions on Codex image transports and rejects them for the Web transport.
+
+- `web/src/app/settings/` and `web/src/app/image/page.tsx`
+  - Add image backend model, task worker, fallback, and user quota controls.
+  - Show remaining user image quota on the image page.
 
 - `services/protocol/openai_v1_models.py`
   - Keeps `/v1/models` from exposing hidden suffix models.
@@ -89,19 +130,28 @@ This redistribution also includes publication-oriented cleanup:
   - Add offline regression coverage for hidden GPT-image suffix parsing and backend slug selection.
   - Verify hidden suffixes are not exposed through `/v1/models`.
 
+- `.github/workflows/docker-publish.yml`
+  - Blocks image publication until frozen dependency installation, offline backend tests, TypeScript checking, and the production Web build pass.
+
+- `Dockerfile`
+  - Uses the tracked Bun lockfile with `bun install --frozen-lockfile`, matching the frontend dependency graph validated by CI.
+
 ## Validation Performed
 
-The deployed AI-modified version was checked with:
+The current source tree was checked with:
 
-- Python syntax compilation for modified files.
-- Offline unit tests for account image capabilities and model listing.
+- Python syntax compilation for `api`, `services`, `utils`, and `test`.
+- Frozen dev dependency installation with `uv sync --dev --frozen`.
+- Offline backend suite: `172 passed, 2 skipped` (plus 8 passing subtests).
+- Frontend TypeScript check with `tsc --noEmit`.
+- Next.js production build for all application routes.
+- GitHub Actions workflow YAML parsing.
 - `/v1/models` check: only `gpt-image-2` is exposed for GPT-image models.
 - Backend helper check:
   - `gpt-image-2` accepted with no thinking effort.
   - `gpt-image-2-low`, `gpt-image-2-medium`, `gpt-image-2-high`, `gpt-image-2-xhigh` accepted as hidden suffix models.
   - `gpt-image-2-min`, `gpt-image-2-standard`, `gpt-image-2-extended`, `gpt-image-2-max` rejected.
-- Runtime health check on the deployed service.
-- Real image-generation requests for default and thinking-suffix variants during deployment testing.
+- Desktop and mobile Web settings screenshots after the production build.
 
 ## Security Notes
 

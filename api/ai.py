@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
@@ -7,9 +9,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from api.image_inputs import parse_image_edit_request, read_image_sources
 from api.support import require_identity, resolve_image_base_url
+from services.auth_service import (
+    ImageQuotaExceeded,
+    ImageQuotaStorageError,
+    auth_service,
+    create_api_image_reservation_id,
+)
 from services.content_filter import check_request, request_shape, request_text
+from services.config import config
 from services.editable_file_task_service import editable_file_task_service
-from services.log_service import LoggedCall
+from services.log_service import LoggedCall, count_response_image_items
 from services.protocol import (
     anthropic_v1_messages,
     openai_v1_chat_complete,
@@ -19,6 +28,9 @@ from services.protocol import (
     openai_v1_response,
     openai_search,
 )
+from services.openai_backend_api import resolve_image_backend_route
+from utils.helper import has_response_image_generation_tool, is_image_chat_request, parse_image_count
+from utils.log import logger
 
 
 class ImageGenerationRequest(BaseModel):
@@ -80,6 +92,80 @@ async def filter_or_log(call: LoggedCall, text: str) -> None:
 def create_router() -> APIRouter:
     router = APIRouter()
 
+    async def run_image_call_with_quota(
+        identity: dict[str, object],
+        amount: int,
+        call: LoggedCall,
+        handler,
+        payload: dict[str, object],
+    ):
+        quota_reserved = False
+        quota_settled = False
+        reservation_id = create_api_image_reservation_id()
+
+        def settle_image_quota(success_count: int, *, suppress_errors: bool = False) -> None:
+            nonlocal quota_settled
+            if not quota_reserved or quota_settled:
+                return
+            last_error: Exception | None = None
+            for attempt in range(3):
+                try:
+                    settled = auth_service.settle_image_quota(
+                        str(identity.get("id") or ""),
+                        max(0, int(success_count)),
+                        reservation_id=reservation_id,
+                    )
+                    if not settled:
+                        raise ImageQuotaStorageError("图片额度预留记录不存在，无法完成结算")
+                    quota_settled = True
+                    return
+                except Exception as exc:
+                    last_error = exc
+                    if attempt < 2:
+                        time.sleep(0.05 * (attempt + 1))
+            if suppress_errors:
+                logger.error({
+                    "event": "image_quota_stream_settlement_failed",
+                    "reservation_id": reservation_id,
+                    "error": str(last_error or "")[:300],
+                })
+                return
+            raise last_error or ImageQuotaStorageError("图片额度结算失败")
+
+        try:
+            backend_model, thinking_effort = resolve_image_backend_route(str(payload.get("model") or "gpt-image-2"))
+            payload["_image_backend_model"] = backend_model
+            payload["_image_thinking_effort"] = thinking_effort
+            payload["_image_fallback_enabled"] = config.image_model_fallback_enabled
+            quota_reserved = auth_service.reserve_image_quota(
+                identity,
+                amount,
+                reservation_id=reservation_id,
+            )
+            result = await call.run(
+                handler,
+                payload,
+                stream_finalizer=lambda success_count, _completed: settle_image_quota(
+                    success_count,
+                    suppress_errors=True,
+                ),
+            )
+            if getattr(result, "status_code", 200) >= 400:
+                settle_image_quota(0)
+            elif isinstance(result, dict):
+                settle_image_quota(count_response_image_items(result))
+            return result
+        except ImageQuotaExceeded as exc:
+            raise HTTPException(status_code=429, detail={"error": str(exc)}) from exc
+        except Exception:
+            if quota_reserved and not quota_settled:
+                auth_service.refund_image_quota(
+                    str(identity.get("id") or ""),
+                    amount,
+                    reservation_id=reservation_id,
+                )
+            raise
+
     @router.get("/v1/models")
     async def list_models(authorization: str | None = Header(default=None)):
         require_identity(authorization)
@@ -99,7 +185,13 @@ def create_router() -> APIRouter:
         payload["base_url"] = resolve_image_base_url(request)
         call = LoggedCall(identity, "/v1/images/generations", body.model, "文生图", request_text=body.prompt)
         await filter_or_log(call, body.prompt)
-        return await call.run(openai_v1_image_generations.handle, payload)
+        return await run_image_call_with_quota(
+            identity,
+            body.n,
+            call,
+            openai_v1_image_generations.handle,
+            payload,
+        )
 
     @router.post("/v1/images/edits")
     async def edit_images(
@@ -116,7 +208,13 @@ def create_router() -> APIRouter:
         if mask_sources:
             payload["mask"] = await read_image_sources(mask_sources)
         payload["base_url"] = resolve_image_base_url(request)
-        return await call.run(openai_v1_image_edit.handle, payload)
+        return await run_image_call_with_quota(
+            identity,
+            int(payload.get("n") or 1),
+            call,
+            openai_v1_image_edit.handle,
+            payload,
+        )
 
     @router.post("/v1/chat/completions")
     async def create_chat_completion(body: ChatCompletionRequest, authorization: str | None = Header(default=None)):
@@ -133,6 +231,14 @@ def create_router() -> APIRouter:
             request_shape=request_shape(payload.get("messages")),
         )
         await filter_or_log(call, request_preview)
+        if is_image_chat_request(payload):
+            return await run_image_call_with_quota(
+                identity,
+                parse_image_count(payload.get("n")),
+                call,
+                openai_v1_chat_complete.handle,
+                payload,
+            )
         return await call.run(openai_v1_chat_complete.handle, payload)
 
     @router.post("/v1/responses")
@@ -150,6 +256,14 @@ def create_router() -> APIRouter:
             request_shape=request_shape(payload.get("input")),
         )
         await filter_or_log(call, request_preview)
+        if has_response_image_generation_tool(payload):
+            return await run_image_call_with_quota(
+                identity,
+                parse_image_count(payload.get("n")),
+                call,
+                openai_v1_response.handle,
+                payload,
+            )
         return await call.run(openai_v1_response.handle, payload)
 
     @router.post("/v1/messages")

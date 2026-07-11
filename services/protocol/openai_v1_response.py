@@ -28,7 +28,7 @@ from services.protocol.web_search_tool import (
     search_query_from_messages,
     text_with_url_citations,
 )
-from utils.helper import extract_image_from_message_content, extract_response_prompt, has_response_image_generation_tool
+from utils.helper import extract_image_from_message_content, extract_response_prompt, has_response_image_generation_tool, parse_image_count
 from utils.image_tokens import (
     count_image_content_tokens,
     count_image_output_items_tokens,
@@ -370,33 +370,37 @@ def stream_image_response(
     response_id = f"resp_{uuid.uuid4().hex}"
     created = int(time.time())
     yield response_created(response_id, model, created)
+    result_data: list[dict[str, Any]] = []
+    message_text = ""
     for output in image_outputs:
         if output.kind == "message":
-            text = output.text
-            item = text_output_item(text)
-            usage = token_usage(
-                input_text_tokens=count_text_tokens(prompt, model),
-                input_image_tokens=input_image_tokens,
-                output_text_tokens=count_text_tokens(text, model),
-            )
-            yield {"type": "response.output_text.delta", "item_id": item["id"], "output_index": 0, "content_index": 0, "delta": text}
-            yield {"type": "response.output_text.done", "item_id": item["id"], "output_index": 0, "content_index": 0, "text": text}
-            yield {"type": "response.output_item.done", "output_index": 0, "item": item}
-            yield response_completed(response_id, model, created, [item], usage)
-            return
-        if output.kind != "result":
-            continue
-        items = image_output_items(prompt, output.data)
-        if items:
-            usage = image_usage(
-                input_text_tokens=count_text_tokens(prompt, model),
-                input_image_tokens=input_image_tokens,
-                output_tokens=count_image_output_items_tokens(output.data, size, quality),
-            )
-            for output_index, item in enumerate(items):
-                yield {"type": "response.output_item.done", "output_index": output_index, "item": item}
-            yield response_completed(response_id, model, created, items, usage)
-            return
+            if not message_text:
+                message_text = output.text
+        elif output.kind == "result":
+            result_data.extend(item for item in output.data if isinstance(item, dict))
+    items = image_output_items(prompt, result_data)
+    if items:
+        usage = image_usage(
+            input_text_tokens=count_text_tokens(prompt, model),
+            input_image_tokens=input_image_tokens,
+            output_tokens=count_image_output_items_tokens(result_data, size, quality),
+        )
+        for output_index, item in enumerate(items):
+            yield {"type": "response.output_item.done", "output_index": output_index, "item": item}
+        yield response_completed(response_id, model, created, items, usage)
+        return
+    if message_text:
+        item = text_output_item(message_text)
+        usage = token_usage(
+            input_text_tokens=count_text_tokens(prompt, model),
+            input_image_tokens=input_image_tokens,
+            output_text_tokens=count_text_tokens(message_text, model),
+        )
+        yield {"type": "response.output_text.delta", "item_id": item["id"], "output_index": 0, "content_index": 0, "delta": message_text}
+        yield {"type": "response.output_text.done", "item_id": item["id"], "output_index": 0, "content_index": 0, "text": message_text}
+        yield {"type": "response.output_item.done", "output_index": 0, "item": item}
+        yield response_completed(response_id, model, created, [item], usage)
+        return
     raise RuntimeError("image generation failed")
 
 
@@ -438,10 +442,22 @@ def response_events(body: dict[str, Any]) -> Iterator[dict[str, Any]]:
     image_outputs = stream_image_outputs_with_pool(ConversationRequest(
         prompt=prompt,
         model=model,
+        n=parse_image_count(body.get("n")),
         size=tool.get("size"),
         quality=str(tool.get("quality") or "auto"),
         response_format="b64_json",
         images=images,
+        image_backend_model=str(body.get("_image_backend_model") or ""),
+        image_thinking_effort=(
+            str(body.get("_image_thinking_effort"))
+            if body.get("_image_thinking_effort") is not None
+            else None
+        ),
+        image_fallback_enabled=(
+            bool(body.get("_image_fallback_enabled"))
+            if body.get("_image_fallback_enabled") is not None
+            else None
+        ),
     ))
     yield from stream_image_response(image_outputs, prompt, model, input_image_tokens, tool.get("size"), str(tool.get("quality") or "auto"))
 

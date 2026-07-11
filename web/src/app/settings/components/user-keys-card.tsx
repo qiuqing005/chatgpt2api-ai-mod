@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Ban, CheckCircle2, Copy, KeyRound, LoaderCircle, Pencil, Plus, Trash2 } from "lucide-react";
+import { Ban, CheckCircle2, Copy, KeyRound, LoaderCircle, Pencil, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -35,25 +35,45 @@ function formatDateTime(value?: string | null) {
   }).format(date);
 }
 
+function parseImageQuota(value: string): number | null {
+  const normalized = value.trim();
+  if (!/^\d+$/.test(normalized)) return null;
+  const quota = Number(normalized);
+  if (!Number.isSafeInteger(quota) || quota < 0 || quota > 10_000_000) return null;
+  return quota;
+}
+
 export function UserKeysCard() {
   const didLoadRef = useRef(false);
   const [items, setItems] = useState<UserKey[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [name, setName] = useState("");
+  const [imageQuota, setImageQuota] = useState("0");
   const [isCreating, setIsCreating] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
+  const [quotaInputs, setQuotaInputs] = useState<Record<string, string>>({});
   const [revealedKey, setRevealedKey] = useState("");
   const [deletingItem, setDeletingItem] = useState<UserKey | null>(null);
   const [editingItem, setEditingItem] = useState<UserKey | null>(null);
   const [editName, setEditName] = useState("");
   const [editKey, setEditKey] = useState("");
 
+  const syncQuotaInputs = (nextItems: UserKey[], preserveExisting = false, resetId = "") => {
+    setQuotaInputs((current) => Object.fromEntries(nextItems.map((item) => [
+      item.id,
+      preserveExisting && item.id !== resetId && current[item.id] !== undefined
+        ? current[item.id]
+        : String(item.image_quota || 0),
+    ])));
+  };
+
   const load = async () => {
     setIsLoading(true);
     try {
       const data = await fetchUserKeys();
       setItems(data.items);
+      syncQuotaInputs(data.items);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "加载用户密钥失败");
     } finally {
@@ -70,12 +90,19 @@ export function UserKeysCard() {
   }, []);
 
   const handleCreate = async () => {
+    const quota = parseImageQuota(imageQuota);
+    if (quota === null) {
+      toast.error("图片生成上限必须是 0 到 10000000 的整数");
+      return;
+    }
     setIsCreating(true);
     try {
-      const data = await createUserKey(name.trim());
+      const data = await createUserKey(name.trim(), quota);
       setItems(data.items);
+      syncQuotaInputs(data.items, true);
       setRevealedKey(data.key);
       setName("");
+      setImageQuota("0");
       setIsDialogOpen(false);
       toast.success("用户密钥已创建");
     } catch (error) {
@@ -102,9 +129,43 @@ export function UserKeysCard() {
     try {
       const data = await updateUserKey(item.id, { enabled: !item.enabled });
       setItems(data.items);
+      syncQuotaInputs(data.items, true);
       toast.success(item.enabled ? "用户密钥已禁用" : "用户密钥已启用");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "更新用户密钥失败");
+    } finally {
+      setItemPending(item.id, false);
+    }
+  };
+
+  const handleSaveQuota = async (item: UserKey) => {
+    const quota = parseImageQuota(quotaInputs[item.id] ?? "");
+    if (quota === null) {
+      toast.error("图片额度必须是 0 到 10000000 的整数");
+      return;
+    }
+    setItemPending(item.id, true);
+    try {
+      const data = await updateUserKey(item.id, { image_quota: quota });
+      setItems(data.items);
+      syncQuotaInputs(data.items, true, item.id);
+      toast.success("图片额度已更新");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "更新图片额度失败");
+    } finally {
+      setItemPending(item.id, false);
+    }
+  };
+
+  const handleResetUsage = async (item: UserKey) => {
+    setItemPending(item.id, true);
+    try {
+      const data = await updateUserKey(item.id, { image_used: 0 });
+      setItems(data.items);
+      syncQuotaInputs(data.items, true);
+      toast.success("图片用量已清零");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "清零图片用量失败");
     } finally {
       setItemPending(item.id, false);
     }
@@ -119,6 +180,7 @@ export function UserKeysCard() {
     try {
       const data = await deleteUserKey(item.id);
       setItems(data.items);
+      syncQuotaInputs(data.items, true);
       setDeletingItem(null);
       toast.success("用户密钥已删除");
     } catch (error) {
@@ -152,6 +214,7 @@ export function UserKeysCard() {
         ...(trimmedKey ? { key: trimmedKey } : {}),
       });
       setItems(data.items);
+      syncQuotaInputs(data.items, true);
       setEditingItem(null);
       setEditKey("");
       toast.success(trimmedKey ? "用户密钥已更新" : "用户名称已更新");
@@ -233,10 +296,46 @@ export function UserKeysCard() {
                       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-500">
                         <span>创建时间 {formatDateTime(item.created_at)}</span>
                         <span>最近使用 {formatDateTime(item.last_used_at)}</span>
+                        <span>图片用量 {item.image_quota > 0 ? `${item.image_used}/${item.image_quota}` : `${item.image_used}/不限`}</span>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex h-9 items-center gap-2 rounded-xl border border-stone-200 bg-white px-3">
+                        <span className="text-xs text-stone-500">上限</span>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="10000000"
+                          step="1"
+                          value={quotaInputs[item.id] ?? String(item.image_quota || 0)}
+                          onChange={(event) => setQuotaInputs((current) => ({ ...current, [item.id]: event.target.value }))}
+                          className="h-7 w-20 border-0 bg-transparent px-0 text-center text-sm shadow-none focus-visible:ring-0"
+                          disabled={isPending}
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="size-9 rounded-xl border-stone-200 bg-white text-stone-700"
+                        onClick={() => void handleSaveQuota(item)}
+                        disabled={isPending}
+                        title="保存图片额度"
+                      >
+                        {isPending ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="size-9 rounded-xl border-stone-200 bg-white text-stone-700"
+                        onClick={() => void handleResetUsage(item)}
+                        disabled={isPending || item.image_used === 0}
+                        title="清零图片用量"
+                      >
+                        <RotateCcw className="size-4" />
+                      </Button>
                       <Button
                         type="button"
                         variant="outline"
@@ -290,14 +389,30 @@ export function UserKeysCard() {
               可选填写一个备注名称，方便区分不同使用者；创建后会生成一条只能查看一次的原始密钥。
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">名称（可选）</label>
-            <Input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="例如：设计同学 A、运营临时账号"
-              className="h-11 rounded-xl border-stone-200 bg-white"
-            />
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-stone-700">名称（可选）</label>
+              <Input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="例如：设计同学 A、运营临时账号"
+                className="h-11 rounded-xl border-stone-200 bg-white"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-stone-700">图片生成上限</label>
+              <Input
+                type="number"
+                min="0"
+                max="10000000"
+                step="1"
+                value={imageQuota}
+                onChange={(event) => setImageQuota(event.target.value)}
+                placeholder="0"
+                className="h-11 rounded-xl border-stone-200 bg-white"
+              />
+              <p className="text-xs text-stone-500">0 表示不限制。</p>
+            </div>
           </div>
           <DialogFooter>
             <Button

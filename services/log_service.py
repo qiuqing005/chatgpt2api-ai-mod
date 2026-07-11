@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import itertools
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -21,6 +23,7 @@ from utils.helper import anthropic_sse_stream, sse_json_stream
 LOG_TYPE_CALL = "call"
 LOG_TYPE_ACCOUNT = "account"
 INTERNAL_RESPONSE_KEYS = {"_account_email", "_conversation_id"}
+MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\(([^)\s]+)")
 
 
 class LogService:
@@ -129,6 +132,75 @@ def _collect_urls(value: object) -> list[str]:
     return urls
 
 
+def _collect_image_fingerprints(value: object) -> set[str]:
+    fingerprints: set[str] = set()
+    if isinstance(value, dict):
+        if value.get("type") == "image_generation_call":
+            result = value.get("result")
+            if isinstance(result, str) and result.strip():
+                fingerprints.add(f"b64:{hashlib.sha256(result.strip().encode('utf-8')).hexdigest()}")
+        for key, item in value.items():
+            if key == "url" and isinstance(item, str) and item.strip():
+                fingerprints.add(f"url:{item.strip()}")
+            elif key == "b64_json" and isinstance(item, str) and item.strip():
+                fingerprints.add(f"b64:{hashlib.sha256(item.encode('utf-8')).hexdigest()}")
+            else:
+                fingerprints.update(_collect_image_fingerprints(item))
+    elif isinstance(value, list):
+        for item in value:
+            fingerprints.update(_collect_image_fingerprints(item))
+    elif isinstance(value, str):
+        for match in MARKDOWN_IMAGE_PATTERN.finditer(value):
+            image_ref = match.group(1).strip()
+            if not image_ref:
+                continue
+            if image_ref.startswith("data:image/") and "," in image_ref:
+                image_ref = image_ref.split(",", 1)[1]
+                fingerprints.add(f"b64:{hashlib.sha256(image_ref.encode('utf-8')).hexdigest()}")
+            else:
+                fingerprints.add(f"url:{image_ref}")
+    return fingerprints
+
+
+def _count_markdown_image_items(value: object) -> int:
+    if isinstance(value, dict):
+        return sum(_count_markdown_image_items(item) for item in value.values())
+    if isinstance(value, list):
+        return sum(_count_markdown_image_items(item) for item in value)
+    if isinstance(value, str):
+        return sum(1 for _ in MARKDOWN_IMAGE_PATTERN.finditer(value))
+    return 0
+
+
+def count_response_image_items(value: object) -> int:
+    if isinstance(value, dict):
+        data = value.get("data")
+        if isinstance(data, list):
+            count = sum(
+                1
+                for item in data
+                if isinstance(item, dict) and (item.get("url") or item.get("b64_json"))
+            )
+            if count:
+                return count
+        output = value.get("output")
+        if isinstance(output, list):
+            count = sum(
+                1
+                for item in output
+                if isinstance(item, dict)
+                and item.get("type") == "image_generation_call"
+                and isinstance(item.get("result"), str)
+                and item.get("result", "").strip()
+            )
+            if count:
+                return count
+        markdown_count = _count_markdown_image_items(value)
+        if markdown_count:
+            return markdown_count
+    return len(_collect_image_fingerprints(value))
+
+
 def _collect_account_emails(value: object) -> list[str]:
     emails: list[str] = []
     if isinstance(value, dict):
@@ -224,7 +296,13 @@ class LoggedCall:
     request_text: str = ""
     request_shape: dict[str, int] | None = None
 
-    async def run(self, handler, *args, sse: str = "openai"):
+    async def run(
+        self,
+        handler,
+        *args,
+        sse: str = "openai",
+        stream_finalizer: Callable[[int, bool], None] | None = None,
+    ):
         from services.protocol.conversation import ImageGenerationError
 
         try:
@@ -265,20 +343,31 @@ class LoggedCall:
             return _protocol_error_response(exc, 502, sse)
         if not has_first:
             self.log("流式调用结束")
+            if stream_finalizer is not None:
+                stream_finalizer(0, True)
             return StreamingResponse(sender(()), media_type="text/event-stream")
-        return StreamingResponse(sender(self.stream(itertools.chain([first], result))), media_type="text/event-stream")
+        return StreamingResponse(
+            sender(self.stream(itertools.chain([first], result), stream_finalizer=stream_finalizer)),
+            media_type="text/event-stream",
+        )
 
-    def stream(self, items):
+    def stream(self, items, *, stream_finalizer: Callable[[int, bool], None] | None = None):
         urls: list[str] = []
         account_emails: list[str] = []
         conversation_ids: list[str] = []
+        image_count = 0
         failed = False
+        completed = False
         try:
             for item in items:
                 urls.extend(_collect_urls(item))
                 account_emails.extend(_collect_account_emails(item))
                 conversation_ids.extend(_collect_conversation_ids(item))
+                item_type = str(item.get("type") or "") if isinstance(item, dict) else ""
+                if item_type != "response.completed":
+                    image_count += count_response_image_items(item)
                 yield _strip_internal_response_fields(item)
+            completed = True
         except Exception as exc:
             failed = True
             self.log(
@@ -295,6 +384,8 @@ class LoggedCall:
                 raise ImageGenerationError(public_image_error_message(str(exc))) from exc
             raise
         finally:
+            if stream_finalizer is not None:
+                stream_finalizer(image_count, completed)
             if not failed:
                 self.log("流式调用结束", urls=urls, account_email=account_emails[0] if account_emails else "",
                          conversation_id=conversation_ids[0] if conversation_ids else "")

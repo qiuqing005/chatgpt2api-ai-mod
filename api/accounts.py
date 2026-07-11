@@ -14,7 +14,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from services.auth_service import auth_service
+from services.auth_service import MAX_IMAGE_QUOTA, auth_service
 
 from api.support import (
     require_admin,
@@ -37,12 +37,15 @@ from services.sub2api_service import (
 
 class UserKeyCreateRequest(BaseModel):
     name: str = ""
+    image_quota: int = Field(default=0, ge=0, le=MAX_IMAGE_QUOTA)
 
 
 class UserKeyUpdateRequest(BaseModel):
     name: str | None = None
     enabled: bool | None = None
     key: str | None = None
+    image_quota: int | None = Field(default=None, ge=0, le=MAX_IMAGE_QUOTA)
+    image_used: int | None = Field(default=None, ge=0, le=MAX_IMAGE_QUOTA)
 
 
 class AccountCreateRequest(BaseModel):
@@ -169,7 +172,11 @@ def create_router() -> APIRouter:
     async def create_user_key(body: UserKeyCreateRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
         try:
-            item, raw_key = auth_service.create_key(role="user", name=body.name)
+            item, raw_key = auth_service.create_key(
+                role="user",
+                name=body.name,
+                image_quota=body.image_quota,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         return {"item": item, "key": raw_key, "items": auth_service.list_keys(role="user")}
@@ -187,6 +194,8 @@ def create_router() -> APIRouter:
                 "name": body.name,
                 "enabled": body.enabled,
                 "key": body.key,
+                "image_quota": body.image_quota,
+                "image_used": body.image_used,
             }.items()
             if value is not None
         }

@@ -58,6 +58,66 @@ class ConfigLoadingTests(unittest.TestCase):
                 else:
                     module.os.environ["CHATGPT2API_AUTH_KEY"] = old_env_auth_key
 
+    def test_image_model_routing_is_validated_and_persisted(self) -> None:
+        module = self.config_module
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"auth-key": "test-auth"}), encoding="utf-8")
+            store = module.ConfigStore(path)
+
+            result = store.update_image_generation_settings({
+                "base_model": "gpt-5.6-sol",
+                "thinking_model": "gpt-5.6-sol",
+                "fallback_enabled": False,
+                "task_workers": 16,
+            })
+
+            self.assertEqual(result["base_model"], "gpt-5.6-sol")
+            self.assertFalse(result["fallback_enabled"])
+            self.assertEqual(result["task_workers"], 16)
+            store.update({"image_model_routing": {"base_model": "ignored"}, "image_task_workers": 1})
+            self.assertEqual(store.get_image_generation_settings(), result)
+            with self.assertRaises(ValueError):
+                store.update_image_generation_settings({
+                    "base_model": "bad model",
+                    "thinking_model": "gpt-5.6-sol",
+                    "fallback_enabled": True,
+                    "task_workers": 2,
+                })
+            with self.assertRaises(ValueError):
+                store.update_image_generation_settings({
+                    "base_model": "gpt-image-2",
+                    "thinking_model": "gpt-5.6-sol",
+                    "fallback_enabled": True,
+                    "task_workers": 2,
+                })
+            with self.assertRaises(ValueError):
+                store.update_image_generation_settings({
+                    "base_model": "codex-gpt-5.6-sol",
+                    "thinking_model": "gpt-5.6-sol",
+                    "fallback_enabled": True,
+                    "task_workers": 2,
+                })
+
+    def test_invalid_loaded_image_backend_models_fall_back_to_defaults(self) -> None:
+        module = self.config_module
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({
+                "auth-key": "test-auth",
+                "image_model_routing": {
+                    "base_model": "gpt-image-2",
+                    "thinking_model": "codex-gpt-5.6-sol",
+                    "fallback_enabled": False,
+                },
+            }), encoding="utf-8")
+
+            settings = module.ConfigStore(path).get_image_generation_settings()
+
+            self.assertEqual(settings["base_model"], "gpt-5-5")
+            self.assertEqual(settings["thinking_model"], "gpt-5-5-thinking")
+            self.assertFalse(settings["fallback_enabled"])
+
 
 if __name__ == "__main__":
     unittest.main()

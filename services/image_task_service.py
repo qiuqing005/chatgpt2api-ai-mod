@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import queue
 import threading
 import time
 from collections.abc import Callable
@@ -8,10 +10,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from services.account_service import account_service
+from services.auth_service import auth_service
 from services.config import DATA_DIR, config
 from services.content_filter import request_text
 from services.log_service import LOG_TYPE_CALL, log_service
+from services.openai_backend_api import resolve_image_backend_route
 from services.protocol import openai_v1_image_edit, openai_v1_image_generations
+from utils.log import logger
 
 TASK_STATUS_QUEUED = "queued"
 TASK_STATUS_RUNNING = "running"
@@ -19,6 +25,68 @@ TASK_STATUS_SUCCESS = "success"
 TASK_STATUS_ERROR = "error"
 TERMINAL_STATUSES = {TASK_STATUS_SUCCESS, TASK_STATUS_ERROR}
 UNFINISHED_STATUSES = {TASK_STATUS_QUEUED, TASK_STATUS_RUNNING}
+MAX_CLIENT_TASK_ID_LENGTH = 128
+
+
+class ImageTaskQueueUnavailable(RuntimeError):
+    pass
+
+
+class ImageTaskStorageError(RuntimeError):
+    pass
+
+
+class DaemonWorkerPool:
+    def __init__(self, max_workers: int, *, name_prefix: str) -> None:
+        max_queue_size = max(16, min(128, max_workers * 8))
+        self._queue: queue.Queue[tuple[Callable[..., Any], tuple[Any, ...]]] = queue.Queue(
+            maxsize=max_queue_size
+        )
+        self._threads: list[threading.Thread] = []
+        self._state_lock = threading.Lock()
+        self._closed = False
+        for index in range(max_workers):
+            worker = threading.Thread(
+                target=self._run,
+                name=f"{name_prefix}-{index + 1}",
+                daemon=True,
+            )
+            worker.start()
+            self._threads.append(worker)
+
+    def submit(self, handler: Callable[..., Any], *args: Any) -> None:
+        with self._state_lock:
+            if self._closed:
+                raise RuntimeError("image task worker pool is closed")
+            self._queue.put_nowait((handler, args))
+
+    def close(self, *, wait: bool = False) -> None:
+        with self._state_lock:
+            if self._closed:
+                return
+            self._closed = True
+        if wait:
+            self._queue.join()
+        for _ in self._threads:
+            try:
+                self._queue.put_nowait((None, ()))  # type: ignore[arg-type]
+            except queue.Full:
+                break
+        if wait:
+            for worker in self._threads:
+                worker.join(timeout=1)
+
+    def _run(self) -> None:
+        while True:
+            handler, args = self._queue.get()
+            try:
+                if handler is None:
+                    return
+                handler(*args)
+            except Exception as exc:
+                logger.error({"event": "image_task_worker_crash", "error": str(exc)[:300]})
+            finally:
+                self._queue.task_done()
 
 
 def _now_iso() -> str:
@@ -49,6 +117,10 @@ def _owner_id(identity: dict[str, object]) -> str:
 
 def _task_key(owner_id: str, task_id: str) -> str:
     return f"{owner_id}:{task_id}"
+
+
+def _quota_reservation_id(task_key: str) -> str:
+    return hashlib.sha256(task_key.encode("utf-8")).hexdigest()
 
 
 def _collect_image_urls(data: list[Any]) -> list[str]:
@@ -104,12 +176,22 @@ class ImageTaskService:
         generation_handler: Callable[[dict[str, Any]], dict[str, Any]] = openai_v1_image_generations.handle,
         edit_handler: Callable[[dict[str, Any]], dict[str, Any]] = openai_v1_image_edit.handle,
         retention_days_getter: Callable[[], int] | None = None,
+        quota_service: Any = auth_service,
+        task_workers_getter: Callable[[], int] | None = None,
     ):
         self.path = path
         self.generation_handler = generation_handler
         self.edit_handler = edit_handler
         self.retention_days_getter = retention_days_getter or (lambda: config.image_retention_days)
+        self.quota_service = quota_service
+        workers_getter = task_workers_getter or (lambda: config.image_task_workers)
+        try:
+            worker_count = max(1, min(16, int(workers_getter())))
+        except Exception:
+            worker_count = 2
+        self._executor = DaemonWorkerPool(worker_count, name_prefix="image-task")
         self._lock = threading.RLock()
+        self._quota_refund_lock = threading.Lock()
         self._tasks: dict[str, dict[str, Any]] = {}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
@@ -118,6 +200,9 @@ class ImageTaskService:
             changed = self._cleanup_locked() or changed
             if changed:
                 self._save_locked()
+
+    def close(self, *, wait: bool = False) -> None:
+        self._executor.close(wait=wait)
 
     def submit_generation(
         self,
@@ -130,6 +215,8 @@ class ImageTaskService:
         quality: str = "auto",
         base_url: str = "",
     ) -> dict[str, Any]:
+        backend_model, thinking_effort = resolve_image_backend_route(model)
+        fallback_enabled = config.image_model_fallback_enabled
         payload = {
             "prompt": prompt,
             "model": model,
@@ -138,6 +225,9 @@ class ImageTaskService:
             "quality": quality,
             "response_format": "url",
             "base_url": base_url,
+            "_image_backend_model": backend_model,
+            "_image_thinking_effort": thinking_effort,
+            "_image_fallback_enabled": fallback_enabled,
         }
         return self._submit(identity, client_task_id=client_task_id, mode="generate", payload=payload)
 
@@ -154,6 +244,8 @@ class ImageTaskService:
         images: list[tuple[bytes, str, str]] | None = None,
         masks: list[tuple[bytes, str, str]] | None = None,
     ) -> dict[str, Any]:
+        backend_model, thinking_effort = resolve_image_backend_route(model)
+        fallback_enabled = config.image_model_fallback_enabled
         payload = {
             "prompt": prompt,
             "images": images or [],
@@ -164,6 +256,9 @@ class ImageTaskService:
             "quality": quality,
             "response_format": "url",
             "base_url": base_url,
+            "_image_backend_model": backend_model,
+            "_image_thinking_effort": thinking_effort,
+            "_image_fallback_enabled": fallback_enabled,
         }
         return self._submit(identity, client_task_id=client_task_id, mode="edit", payload=payload)
 
@@ -202,8 +297,11 @@ class ImageTaskService:
         task_id = _clean(client_task_id)
         if not task_id:
             raise ValueError("client_task_id is required")
+        if len(task_id) > MAX_CLIENT_TASK_ID_LENGTH:
+            raise ValueError(f"client_task_id must not exceed {MAX_CLIENT_TASK_ID_LENGTH} characters")
         owner = _owner_id(identity)
         key = _task_key(owner, task_id)
+        reservation_id = _quota_reservation_id(key)
         now = _now_iso()
         should_start = False
         with self._lock:
@@ -221,22 +319,53 @@ class ImageTaskService:
                 "model": _clean(payload.get("model"), "gpt-image-2"),
                 "size": _clean(payload.get("size")),
                 "quality": _clean(payload.get("quality"), "auto"),
+                "resolved_backend_model": _clean(payload.get("_image_backend_model")),
+                "resolved_thinking_effort": _clean(payload.get("_image_thinking_effort")),
+                "resolved_fallback_enabled": bool(payload.get("_image_fallback_enabled")),
                 "created_at": now,
                 "updated_at": now,
                 "created_ts": time.time(),
+                "quota_reserved": False,
+                "quota_reservation_tracked": True,
+                "quota_reservation_id": reservation_id,
             }
-            self._tasks[key] = task
-            self._save_locked()
+            quota_reserved = False
+            try:
+                self._tasks[key] = task
+                self._save_locked()
+
+                quota_reserved = self.quota_service.reserve_image_quota(
+                    identity,
+                    1,
+                    reservation_id=reservation_id,
+                )
+                if quota_reserved:
+                    task["quota_reserved"] = True
+                    self._save_locked()
+            except Exception:
+                self._tasks.pop(key, None)
+                if quota_reserved:
+                    self.quota_service.refund_image_quota(owner, 1, reservation_id=reservation_id)
+                self._save_locked()
+                raise
             should_start = True
 
         if should_start:
-            thread = threading.Thread(
-                target=self._run_task,
-                args=(key, mode, payload, dict(identity), _clean(payload.get("model"), "gpt-image-2")),
-                name=f"image-task-{task_id[:16]}",
-                daemon=True,
-            )
-            thread.start()
+            try:
+                self._executor.submit(
+                    self._run_task,
+                    key,
+                    mode,
+                    payload,
+                    dict(identity),
+                    _clean(payload.get("model"), "gpt-image-2"),
+                )
+            except Exception as exc:
+                self._refund_task_quota(key)
+                with self._lock:
+                    self._tasks.pop(key, None)
+                    self._save_locked()
+                raise ImageTaskQueueUnavailable("image task queue is unavailable") from exc
         return _public_task(task)
 
     def _run_task(
@@ -275,7 +404,19 @@ class ImageTaskService:
                 raise error
             usage = result.get("usage")
             duration_ms = int((time.time() - started) * 1000)
-            self._update_task(key, status=TASK_STATUS_SUCCESS, data=data, usage=usage, error="", duration_ms=duration_ms)
+            self._update_task(
+                key,
+                status=TASK_STATUS_SUCCESS,
+                data=data,
+                usage=usage,
+                error="",
+                duration_ms=duration_ms,
+                **({"account_email": account_email} if account_email else {}),
+            )
+            try:
+                self._commit_task_quota(key)
+            except Exception as exc:
+                logger.error({"event": "image_task_quota_commit_failed", "error": str(exc)[:300]})
             self._log_call(
                 identity,
                 mode,
@@ -291,8 +432,11 @@ class ImageTaskService:
             account_email = _clean(getattr(exc, "account_email", ""))
             conversation_id = _clean(getattr(exc, "conversation_id", ""))
             duration_ms = int((time.time() - started) * 1000)
+            if not self._is_resumable_timeout(error_message, conversation_id):
+                self._refund_task_quota(key)
             self._update_task(key, status=TASK_STATUS_ERROR, error=error_message, data=[],
                               duration_ms=duration_ms,
+                              **({"account_email": account_email} if account_email else {}),
                               **({"conversation_id": conversation_id} if conversation_id else {}))
             self._log_call(
                 identity,
@@ -356,24 +500,76 @@ class ImageTaskService:
             task["updated_ts"] = time.time()
             self._save_locked()
 
+    @staticmethod
+    def _is_resumable_timeout(error: str, conversation_id: str) -> bool:
+        text = str(error or "").lower()
+        return bool(
+            conversation_id
+            and any(marker in text for marker in ("超时", "timeout", "timed out", "仍未找到图片结果"))
+        )
+
+    def _refund_task_quota(self, key: str) -> bool:
+        with self._quota_refund_lock:
+            with self._lock:
+                task = self._tasks.get(key)
+                if not task or not bool(task.get("quota_reserved")):
+                    return False
+                owner_id = _clean(task.get("owner_id"))
+                tracked = bool(task.get("quota_reservation_tracked"))
+                reservation_id = _clean(task.get("quota_reservation_id")) or _quota_reservation_id(key)
+            if tracked:
+                self.quota_service.refund_image_quota(owner_id, 1, reservation_id=reservation_id)
+            else:
+                self.quota_service.refund_image_quota(owner_id, 1)
+            with self._lock:
+                task = self._tasks.get(key)
+                if not task or not bool(task.get("quota_reserved")):
+                    return False
+                task["quota_reserved"] = False
+                task["updated_at"] = _now_iso()
+                task["updated_ts"] = time.time()
+                self._save_locked()
+            return True
+
+    def _commit_task_quota(self, key: str) -> bool:
+        with self._quota_refund_lock:
+            with self._lock:
+                task = self._tasks.get(key)
+                if not task or not bool(task.get("quota_reserved")):
+                    return False
+                owner_id = _clean(task.get("owner_id"))
+                tracked = bool(task.get("quota_reservation_tracked"))
+                reservation_id = _clean(task.get("quota_reservation_id")) or _quota_reservation_id(key)
+            if tracked:
+                self.quota_service.commit_image_quota(owner_id, reservation_id=reservation_id)
+            with self._lock:
+                task = self._tasks.get(key)
+                if not task or not bool(task.get("quota_reserved")):
+                    return False
+                task["quota_reserved"] = False
+                task["updated_at"] = _now_iso()
+                task["updated_ts"] = time.time()
+                self._save_locked()
+            return True
+
     def _load_locked(self) -> dict[str, dict[str, Any]]:
         if not self.path.exists():
             return {}
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
+        except Exception as exc:
+            raise ImageTaskStorageError(f"图片任务账本无法读取：{self.path}") from exc
         raw_items = raw.get("tasks") if isinstance(raw, dict) else raw
         if not isinstance(raw_items, list):
-            return {}
+            raise ImageTaskStorageError(f"图片任务账本格式无效：{self.path}")
         tasks: dict[str, dict[str, Any]] = {}
         for item in raw_items:
             if not isinstance(item, dict):
-                continue
+                raise ImageTaskStorageError(f"图片任务账本包含无效记录：{self.path}")
             task_id = _clean(item.get("id"))
             owner = _clean(item.get("owner_id"))
             if not task_id or not owner:
-                continue
+                raise ImageTaskStorageError(f"图片任务账本包含缺少标识的记录：{self.path}")
             status = _clean(item.get("status"))
             if status not in {TASK_STATUS_QUEUED, TASK_STATUS_RUNNING, TASK_STATUS_SUCCESS, TASK_STATUS_ERROR}:
                 status = TASK_STATUS_ERROR
@@ -391,7 +587,19 @@ class ImageTaskService:
                 "updated_ts": item.get("updated_ts"),
                 "started_ts": item.get("started_ts"),
                 "duration_ms": item.get("duration_ms"),
+                "quota_reserved": bool(item.get("quota_reserved", False)),
+                "quota_reservation_tracked": bool(item.get("quota_reservation_tracked", False)),
+                "quota_reservation_id": _clean(item.get("quota_reservation_id")) or _quota_reservation_id(
+                    _task_key(owner, task_id)
+                ),
+                "resolved_backend_model": _clean(item.get("resolved_backend_model")),
+                "resolved_thinking_effort": _clean(item.get("resolved_thinking_effort")),
+                "resolved_fallback_enabled": bool(item.get("resolved_fallback_enabled", False)),
+                "account_email": _clean(item.get("account_email")),
             }
+            conversation_id = _clean(item.get("conversation_id"))
+            if conversation_id:
+                task["conversation_id"] = conversation_id
             data = item.get("data")
             if isinstance(data, list):
                 task["data"] = data
@@ -412,12 +620,54 @@ class ImageTaskService:
 
     def _recover_unfinished_locked(self) -> bool:
         changed = False
-        for task in self._tasks.values():
+        for key, task in self._tasks.items():
             if task.get("status") in UNFINISHED_STATUSES:
+                if task.get("quota_reserved") or task.get("quota_reservation_tracked"):
+                    try:
+                        if task.get("quota_reservation_tracked"):
+                            self.quota_service.refund_image_quota(
+                                _clean(task.get("owner_id")),
+                                1,
+                                reservation_id=_clean(task.get("quota_reservation_id")) or _quota_reservation_id(key),
+                            )
+                        else:
+                            self.quota_service.refund_image_quota(_clean(task.get("owner_id")), 1)
+                        task["quota_reserved"] = False
+                    except Exception as exc:
+                        logger.error({"event": "image_task_recovery_refund_failed", "error": str(exc)[:300]})
                 task["status"] = TASK_STATUS_ERROR
                 task["error"] = "服务已重启，未完成的图片任务已中断"
                 task["updated_at"] = _now_iso()
                 changed = True
+            elif task.get("status") == TASK_STATUS_SUCCESS and task.get("quota_reserved"):
+                try:
+                    if task.get("quota_reservation_tracked"):
+                        self.quota_service.commit_image_quota(
+                            _clean(task.get("owner_id")),
+                            reservation_id=_clean(task.get("quota_reservation_id")) or _quota_reservation_id(key),
+                        )
+                    task["quota_reserved"] = False
+                    changed = True
+                except Exception as exc:
+                    logger.error({"event": "image_task_recovery_commit_failed", "error": str(exc)[:300]})
+            elif (
+                task.get("status") == TASK_STATUS_ERROR
+                and task.get("quota_reserved")
+                and not self._is_resumable_timeout(_clean(task.get("error")), _clean(task.get("conversation_id")))
+            ):
+                try:
+                    if task.get("quota_reservation_tracked"):
+                        self.quota_service.refund_image_quota(
+                            _clean(task.get("owner_id")),
+                            1,
+                            reservation_id=_clean(task.get("quota_reservation_id")) or _quota_reservation_id(key),
+                        )
+                    else:
+                        self.quota_service.refund_image_quota(_clean(task.get("owner_id")), 1)
+                    task["quota_reserved"] = False
+                    changed = True
+                except Exception as exc:
+                    logger.error({"event": "image_task_recovery_refund_failed", "error": str(exc)[:300]})
         return changed
 
     def _cleanup_locked(self) -> bool:
@@ -432,6 +682,26 @@ class ImageTaskService:
             if task.get("status") in TERMINAL_STATUSES and _timestamp(task.get("updated_at")) < cutoff
         ]
         for key in removed_keys:
+            task = self._tasks.get(key)
+            if task and task.get("quota_reserved"):
+                try:
+                    if task.get("status") == TASK_STATUS_SUCCESS:
+                        if task.get("quota_reservation_tracked"):
+                            self.quota_service.commit_image_quota(
+                                _clean(task.get("owner_id")),
+                                reservation_id=_clean(task.get("quota_reservation_id")) or _quota_reservation_id(key),
+                            )
+                    elif task.get("quota_reservation_tracked"):
+                        self.quota_service.refund_image_quota(
+                            _clean(task.get("owner_id")),
+                            1,
+                            reservation_id=_clean(task.get("quota_reservation_id")) or _quota_reservation_id(key),
+                        )
+                    else:
+                        self.quota_service.refund_image_quota(_clean(task.get("owner_id")), 1)
+                except Exception as exc:
+                    logger.error({"event": "image_task_cleanup_refund_failed", "error": str(exc)[:300]})
+                    continue
             self._tasks.pop(key, None)
         return bool(removed_keys)
 
@@ -451,7 +721,7 @@ class ImageTaskService:
             if task.get("status") != TASK_STATUS_ERROR:
                 raise ValueError("task is not in error state")
             error_msg = _clean(task.get("error"))
-            if "超时" not in error_msg:
+            if not self._is_resumable_timeout(error_msg, _clean(task.get("conversation_id"))):
                 raise ValueError("task error is not a timeout error")
             conversation_id = _clean(task.get("conversation_id"))
             if not conversation_id:
@@ -461,14 +731,19 @@ class ImageTaskService:
             # 将任务状态重置为 running
             self._update_task(key, status=TASK_STATUS_RUNNING, error="")
 
-        # 启动新线程继续轮询
-        thread = threading.Thread(
-            target=self._run_resume_poll,
-            args=(key, conversation_id, extra_timeout_secs, dict(identity), mode, model),
-            name=f"image-resume-{_clean(task_id)[:16]}",
-            daemon=True,
-        )
-        thread.start()
+        try:
+            self._executor.submit(
+                self._run_resume_poll,
+                key,
+                conversation_id,
+                extra_timeout_secs,
+                dict(identity),
+                mode,
+                model,
+            )
+        except Exception as exc:
+            self._update_task(key, status=TASK_STATUS_ERROR, error=error_msg)
+            raise ImageTaskQueueUnavailable("image task queue is unavailable") from exc
         return _public_task(task)
 
     def _run_resume_poll(
@@ -487,7 +762,20 @@ class ImageTaskService:
             from services.openai_backend_api import OpenAIBackendAPI
             from services.protocol.conversation import format_image_result
 
-            backend = OpenAIBackendAPI(proxy_url=config.proxy_url or None)
+            with self._lock:
+                task = self._tasks.get(key)
+                account_email = _clean(task.get("account_email")) if task else ""
+            account = next(
+                (
+                    item
+                    for item in account_service.list_accounts()
+                    if _clean(item.get("email")).lower() == account_email.lower() and _clean(item.get("access_token"))
+                ),
+                None,
+            )
+            if not account:
+                raise RuntimeError("无法找到原图片任务使用的账号，不能继续等待")
+            backend = OpenAIBackendAPI(access_token=_clean(account.get("access_token")))
             file_ids, sediment_ids = backend._poll_image_results(
                 conversation_id,
                 extra_timeout_secs,
@@ -519,7 +807,17 @@ class ImageTaskService:
                 "",
                 int(time.time()),
             )["data"]
-            self._update_task(key, status=TASK_STATUS_SUCCESS, data=data, error="", duration_ms=int((time.time() - started) * 1000))
+            self._update_task(
+                key,
+                status=TASK_STATUS_SUCCESS,
+                data=data,
+                error="",
+                duration_ms=int((time.time() - started) * 1000),
+            )
+            try:
+                self._commit_task_quota(key)
+            except Exception as exc:
+                logger.error({"event": "image_task_quota_commit_failed", "error": str(exc)[:300]})
             self._log_call(
                 identity,
                 mode,
@@ -532,6 +830,8 @@ class ImageTaskService:
         except Exception as exc:
             error_message = str(exc) or "resume poll failed"
             duration_ms = int((time.time() - started) * 1000)
+            if not self._is_resumable_timeout(error_message, conversation_id):
+                self._refund_task_quota(key)
             self._update_task(key, status=TASK_STATUS_ERROR, error=error_message, data=[], duration_ms=duration_ms)
             self._log_call(
                 identity,

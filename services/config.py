@@ -4,10 +4,12 @@ import copy
 from dataclasses import dataclass
 import json
 import os
+import re
 import sys
 from pathlib import Path
 import time
 
+from services.process_lock import SingleProcessLock
 from services.storage.base import StorageBackend
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -47,6 +49,14 @@ DEFAULT_CHAT_COMPLETION_CACHE = {
     "drop_adjacent_duplicates": True,
     "drop_assistant_history": False,
 }
+
+DEFAULT_IMAGE_MODEL_ROUTING = {
+    "base_model": "gpt-5-5",
+    "thinking_model": "gpt-5-5-thinking",
+    "fallback_enabled": True,
+}
+
+IMAGE_BACKEND_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
 DEFAULT_PROXY_RUNTIME_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -196,6 +206,47 @@ def _normalize_chat_completion_cache_settings(value: object) -> dict[str, object
             bool(DEFAULT_CHAT_COMPLETION_CACHE["drop_assistant_history"]),
         ),
     }
+
+
+def _normalize_image_model_routing_settings(value: object) -> dict[str, object]:
+    source = value if isinstance(value, dict) else {}
+    base_model = str(source.get("base_model") or DEFAULT_IMAGE_MODEL_ROUTING["base_model"]).strip()
+    thinking_model = str(source.get("thinking_model") or DEFAULT_IMAGE_MODEL_ROUTING["thinking_model"]).strip()
+    if not _is_valid_image_backend_model(base_model):
+        base_model = str(DEFAULT_IMAGE_MODEL_ROUTING["base_model"])
+    if not _is_valid_image_backend_model(thinking_model):
+        thinking_model = str(DEFAULT_IMAGE_MODEL_ROUTING["thinking_model"])
+    return {
+        "base_model": base_model,
+        "thinking_model": thinking_model,
+        "fallback_enabled": _normalize_bool(
+            source.get("fallback_enabled"),
+            bool(DEFAULT_IMAGE_MODEL_ROUTING["fallback_enabled"]),
+        ),
+    }
+
+
+def _is_valid_image_backend_model(model: str) -> bool:
+    normalized = str(model or "").strip()
+    lower = normalized.lower()
+    return bool(
+        IMAGE_BACKEND_MODEL_RE.fullmatch(normalized)
+        and "image" not in lower
+        and "codex" not in lower
+    )
+
+
+def _validate_image_model_routing_settings(value: object) -> None:
+    if not isinstance(value, dict):
+        raise ValueError("图片底层模型配置格式无效")
+    for key, label in (("base_model", "普通图片模型"), ("thinking_model", "思考图片模型")):
+        model = str(value.get(key) or "").strip()
+        if not model:
+            raise ValueError(f"{label}不能为空")
+        if not IMAGE_BACKEND_MODEL_RE.fullmatch(model):
+            raise ValueError(f"{label}格式无效，仅支持模型 slug 常用字符")
+        if not _is_valid_image_backend_model(model):
+            raise ValueError(f"{label}必须是 Web 底层 GPT 模型，不能填写图片或 Codex 模型别名")
 
 
 def _normalize_status_codes(value: object) -> list[int]:
@@ -423,6 +474,13 @@ class ConfigStore:
             return 3
 
     @property
+    def image_task_workers(self) -> int:
+        try:
+            return max(1, min(16, int(self.data.get("image_task_workers", 2))))
+        except (TypeError, ValueError):
+            return 2
+
+    @property
     def image_parallel_generation(self) -> bool:
         value = self.data.get("image_parallel_generation", True)
         if isinstance(value, str):
@@ -593,8 +651,11 @@ class ConfigStore:
         return _normalize_third_party_apps_settings(self.data.get("third_party_apps"))
 
     def update(self, data: dict[str, object]) -> dict[str, object]:
+        incoming = dict(data or {})
+        incoming.pop("image_model_routing", None)
+        incoming.pop("image_task_workers", None)
         next_data = dict(self.data)
-        next_data.update(dict(data or {}))
+        next_data.update(incoming)
         if "backup" in next_data:
             next_data["backup"] = _normalize_backup_settings(next_data.get("backup"))
         if "image_storage" in next_data:
@@ -629,6 +690,48 @@ class ConfigStore:
     def get_chat_completion_cache_settings(self) -> dict[str, object]:
         return _normalize_chat_completion_cache_settings(self.data.get("chat_completion_cache"))
 
+    def get_image_model_routing_settings(self) -> dict[str, object]:
+        return _normalize_image_model_routing_settings(self.data.get("image_model_routing"))
+
+    def get_image_generation_settings(self) -> dict[str, object]:
+        routing = self.get_image_model_routing_settings()
+        return {
+            "base_model": routing["base_model"],
+            "thinking_model": routing["thinking_model"],
+            "fallback_enabled": routing["fallback_enabled"],
+            "task_workers": self.image_task_workers,
+        }
+
+    def update_image_generation_settings(self, value: dict[str, object]) -> dict[str, object]:
+        routing = {
+            "base_model": value.get("base_model"),
+            "thinking_model": value.get("thinking_model"),
+            "fallback_enabled": value.get("fallback_enabled"),
+        }
+        _validate_image_model_routing_settings(routing)
+        try:
+            task_workers = int(value.get("task_workers") or 2)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError("图片任务并发必须是整数") from exc
+        if task_workers < 1 or task_workers > 16:
+            raise ValueError("图片任务并发必须在 1 到 16 之间")
+        self.data["image_model_routing"] = _normalize_image_model_routing_settings(routing)
+        self.data["image_task_workers"] = task_workers
+        self._save()
+        return self.get_image_generation_settings()
+
+    @property
+    def image_backend_model(self) -> str:
+        return str(self.get_image_model_routing_settings()["base_model"])
+
+    @property
+    def image_backend_thinking_model(self) -> str:
+        return str(self.get_image_model_routing_settings()["thinking_model"])
+
+    @property
+    def image_model_fallback_enabled(self) -> bool:
+        return bool(self.get_image_model_routing_settings()["fallback_enabled"])
+
     def get_storage_backend(self) -> StorageBackend:
         """获取存储后端实例（单例）"""
         if self._storage_backend is None:
@@ -647,4 +750,6 @@ def save_backup_state(state: dict[str, object]) -> dict[str, object]:
     return normalized
 
 
+process_lock = SingleProcessLock(DATA_DIR / ".instance.lock")
+process_lock.acquire()
 config = ConfigStore(CONFIG_FILE)

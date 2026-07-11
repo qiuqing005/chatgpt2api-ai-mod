@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Iterator
 
 import tiktoken
@@ -299,6 +300,9 @@ class ConversationRequest:
     prompt: str = ""
     messages: list[dict[str, Any]] | None = None
     thinking_effort: str = ""
+    image_backend_model: str = ""
+    image_thinking_effort: str | None = None
+    image_fallback_enabled: bool | None = None
     images: list[str] | None = None
     n: int = 1
     size: str | None = None
@@ -665,6 +669,8 @@ def conversation_events(
     size: str | None = None,
     quality: str = "auto",
     thinking_effort: str = "",
+    image_backend_model: str = "",
+    image_thinking_effort: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     normalized = normalize_messages(messages or ([{"role": "user", "content": prompt}] if prompt else []))
     image_model = is_supported_image_model(model)
@@ -678,6 +684,8 @@ def conversation_events(
         images=images if image_model else None,
         system_hints=["picture_v2"] if image_model else None,
         thinking_effort=thinking_effort if not image_model else "",
+        image_backend_model=image_backend_model if image_model else "",
+        image_thinking_effort=image_thinking_effort if image_model else None,
     )
     yield from iter_conversation_payloads(payloads, history_text, history_messages)
 
@@ -783,13 +791,22 @@ def _get_detailed_error_from_tasks(
         return ""
 
 
+_IMAGE_CONVERSATION_DELETE_SLOTS = threading.BoundedSemaphore(2)
+
+
 def _remove_image_conversation_later(backend: OpenAIBackendAPI, conversation_id: str) -> None:
     if not config.image_remove_conversation_after_result or not conversation_id:
         return
+    if not _IMAGE_CONVERSATION_DELETE_SLOTS.acquire(blocking=False):
+        logger.warning({"event": "image_conversation_remove_skipped", "conversation_id": conversation_id})
+        return
+    access_token = str(backend.access_token or "")
 
     def _run() -> None:
+        cleanup_backend = None
         try:
-            backend.delete_conversation(conversation_id)
+            cleanup_backend = OpenAIBackendAPI(access_token=access_token)
+            cleanup_backend.delete_conversation(conversation_id)
             logger.info({"event": "image_conversation_removed", "conversation_id": conversation_id})
         except Exception as exc:
             logger.warning({
@@ -797,6 +814,10 @@ def _remove_image_conversation_later(backend: OpenAIBackendAPI, conversation_id:
                 "conversation_id": conversation_id,
                 "error": str(exc),
             })
+        finally:
+            if cleanup_backend is not None:
+                cleanup_backend.close()
+            _IMAGE_CONVERSATION_DELETE_SLOTS.release()
 
     threading.Thread(target=_run, name=f"remove-image-conversation-{conversation_id}", daemon=True).start()
 
@@ -815,6 +836,8 @@ def stream_image_outputs(
             images=request.images or [],
             size=request.size,
             quality=request.quality,
+            image_backend_model=request.image_backend_model,
+            image_thinking_effort=request.image_thinking_effort,
     ):
         last = event
         if event.get("type") == "conversation.delta":
@@ -1209,22 +1232,36 @@ def stream_image_outputs(
                           conversation_id=conversation_id)
 
 
-def _codex_response_images(value: Any) -> list[str]:
+def _codex_response_image_items(value: Any) -> list[tuple[str, str]]:
     if isinstance(value, dict):
         if value.get("type") == "image_generation_call" and isinstance(value.get("result"), str):
             result = value["result"].strip()
             if result:
-                return [result.split(",", 1)[1] if result.startswith("data:image/") else result]
-        images: list[str] = []
+                normalized = result.split(",", 1)[1] if result.startswith("data:image/") else result
+                item_id = str(value.get("id") or "").strip()
+                key = f"id:{item_id}" if item_id else f"result:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}"
+                return [(key, normalized)]
+        images: list[tuple[str, str]] = []
         for item in value.values():
-            images.extend(_codex_response_images(item))
+            images.extend(_codex_response_image_items(item))
         return images
     if isinstance(value, list):
-        images: list[str] = []
+        images: list[tuple[str, str]] = []
         for item in value:
-            images.extend(_codex_response_images(item))
+            images.extend(_codex_response_image_items(item))
         return images
     return []
+
+
+def _codex_response_images(value: Any) -> list[str]:
+    images: list[str] = []
+    seen: set[str] = set()
+    for key, result in _codex_response_image_items(value):
+        if key in seen:
+            continue
+        seen.add(key)
+        images.append(result)
+    return images
 
 
 def stream_codex_image_outputs(
@@ -1484,7 +1521,77 @@ def _generate_single_image(
                 backend.close()
 
 
-def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[ImageOutput]:
+def _image_model_fallback_chain(model: str, fallback_enabled: bool | None = None) -> list[str]:
+    normalized = str(model or "").strip() or "gpt-image-2"
+    enabled = config.image_model_fallback_enabled if fallback_enabled is None else fallback_enabled
+    if not enabled or not is_codex_image_model(normalized):
+        return [normalized]
+    candidates = [normalized]
+    if normalized != "codex-gpt-image-2":
+        candidates.append("codex-gpt-image-2")
+    return list(dict.fromkeys(item for item in candidates if is_supported_image_model(item)))
+
+
+def _is_high_resolution_image_size(size: object) -> bool:
+    match = re.fullmatch(r"\s*(\d{2,5})x(\d{2,5})\s*", str(size or ""), re.IGNORECASE)
+    if not match:
+        return False
+    width, height = int(match.group(1)), int(match.group(2))
+    return width > 1920 or height > 1920 or width * height > 1920 * 1088
+
+
+def _validate_image_size_for_model(model: str, size: object) -> None:
+    if _is_high_resolution_image_size(size) and not is_codex_image_model(model):
+        raise ImageGenerationError(
+            "2K/4K image sizes are only supported by Codex image models",
+            status_code=400,
+            error_type="invalid_request_error",
+            code="unsupported_image_size",
+            param="size",
+        )
+
+
+def _is_image_model_quota_error(exc: Exception) -> bool:
+    if isinstance(exc, ImageContentPolicyError):
+        return False
+    text = str(exc or "").lower()
+    code = str(getattr(exc, "code", "") or "").strip().lower()
+    error_type = str(getattr(exc, "error_type", "") or "").strip().lower()
+    policy_codes = {"content_policy_violation", "moderation_blocked", "safety_violation"}
+    if code in policy_codes or error_type in policy_codes:
+        return False
+    if any(marker in text for marker in (
+        "content_policy",
+        "content policy",
+        "moderation",
+        "policy_violation",
+        "内容政策",
+        "内容策略",
+        "内容审核",
+        "安全策略",
+        "违规内容",
+    )):
+        return False
+    status_code = getattr(exc, "status_code", None)
+    if status_code == 429:
+        return True
+    if code in {"rate_limit_exceeded", "usage_limit_reached", "insufficient_quota"}:
+        return True
+    if "no available" in text and "image quota" in text:
+        return True
+    return any(
+        marker in text
+        for marker in (
+            "usage_limit_reached",
+            "limit has been reached",
+            "quota exceeded",
+            "rate limit",
+            "rate_limit",
+        )
+    )
+
+
+def _stream_image_outputs_with_pool_once(request: ConversationRequest) -> Iterator[ImageOutput]:
     """并行生成多张图片，每张图片使用独立线程和账号，互不阻塞。"""
     if not is_supported_image_model(request.model):
         raise ImageGenerationError("unsupported image model,supported models: " + ", ".join(sorted(IMAGE_MODELS)))
@@ -1568,6 +1675,40 @@ def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[Ima
         if not last_error:
             last_error = "no account in the pool could generate images — check account quota and rate-limit status"
         raise ImageGenerationError(image_stream_error_message(last_error), conversation_id="")
+
+
+def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[ImageOutput]:
+    _validate_image_size_for_model(request.model, request.size)
+    fallback_chain = _image_model_fallback_chain(request.model, request.image_fallback_enabled)
+    if not fallback_chain:
+        raise ImageGenerationError("unsupported image model,supported models: " + ", ".join(sorted(IMAGE_MODELS)))
+
+    last_error: Exception | None = None
+    for index, model in enumerate(fallback_chain):
+        attempt_request = request if model == request.model else replace(request, model=model, image_backend_model="")
+        if index > 0:
+            logger.info({
+                "event": "image_model_fallback_attempt",
+                "requested_model": request.model,
+                "attempt_model": model,
+                "previous_error": str(last_error or "")[:300],
+            })
+        try:
+            yield from _stream_image_outputs_with_pool_once(attempt_request)
+            return
+        except Exception as exc:
+            last_error = exc
+            if index >= len(fallback_chain) - 1 or not _is_image_model_quota_error(exc):
+                raise
+            logger.warning({
+                "event": "image_model_fallback",
+                "from_model": model,
+                "to_model": fallback_chain[index + 1],
+                "error": str(exc)[:300],
+            })
+
+    if last_error is not None:
+        raise last_error
 
 
 def stream_image_chunks(outputs: Iterable[ImageOutput]) -> Iterator[dict[str, Any]]:

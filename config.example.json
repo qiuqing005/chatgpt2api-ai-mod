@@ -68,7 +68,13 @@
     }
   },
   "image_account_concurrency": 3,
+  "image_task_workers": 2,
   "image_parallel_generation": true,
+  "image_model_routing": {
+    "base_model": "gpt-5-5",
+    "thinking_model": "gpt-5-5-thinking",
+    "fallback_enabled": true
+  },
   "image_poll_interval_secs": 10,
   "image_poll_initial_wait_secs": 10,
   "image_storage": {

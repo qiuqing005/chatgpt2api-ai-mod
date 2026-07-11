@@ -5,11 +5,11 @@ from urllib.parse import quote
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.support import require_admin, require_identity, resolve_image_base_url
 from services.backup_service import BackupError, backup_service
-from services.config import config
+from services.config import DEFAULT_IMAGE_MODEL_ROUTING, config
 from services.image_service import (
     compress_images,
     delete_images,
@@ -29,6 +29,14 @@ from services.proxy_service import proxy_settings, test_clearance, test_proxy
 
 class SettingsUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
+
+
+class ImageGenerationSettingsUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    base_model: str = Field(..., strict=True, min_length=1, max_length=128)
+    thinking_model: str = Field(..., strict=True, min_length=1, max_length=128)
+    fallback_enabled: bool = Field(..., strict=True)
+    task_workers: int = Field(..., strict=True, ge=1, le=16)
 
 
 class ProxyTestRequest(BaseModel):
@@ -58,19 +66,35 @@ class BackupDeleteRequest(BaseModel):
     key: str = ""
 
 
+def _auth_identity_payload(identity: dict[str, object], app_version: str) -> dict[str, object]:
+    image_quota = max(0, int(identity.get("image_quota") or 0))
+    image_used = max(0, int(identity.get("image_used") or 0))
+    if image_quota > 0:
+        image_used = min(image_used, image_quota)
+    return {
+        "ok": True,
+        "version": app_version,
+        "role": identity.get("role"),
+        "subject_id": identity.get("id"),
+        "name": identity.get("name"),
+        "image_quota": image_quota,
+        "image_used": image_used,
+        "image_remaining": max(0, image_quota - image_used) if image_quota > 0 else None,
+    }
+
+
 def create_router(app_version: str) -> APIRouter:
     router = APIRouter()
 
     @router.post("/auth/login")
     async def login(authorization: str | None = Header(default=None)):
         identity = require_identity(authorization)
-        return {
-            "ok": True,
-            "version": app_version,
-            "role": identity.get("role"),
-            "subject_id": identity.get("id"),
-            "name": identity.get("name"),
-        }
+        return _auth_identity_payload(identity, app_version)
+
+    @router.get("/auth/me")
+    async def get_current_identity(authorization: str | None = Header(default=None)):
+        identity = require_identity(authorization)
+        return _auth_identity_payload(identity, app_version)
 
     @router.get("/version")
     async def get_version():
@@ -93,6 +117,30 @@ def create_router(app_version: str) -> APIRouter:
             return {"config": config.update(body.model_dump(mode="python"))}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+
+    @router.get("/api/settings/image-generation")
+    async def get_image_generation_settings(authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        settings = config.get_image_generation_settings()
+        model_options = {
+            str(settings["base_model"]),
+            str(settings["thinking_model"]),
+            str(DEFAULT_IMAGE_MODEL_ROUTING["base_model"]),
+            str(DEFAULT_IMAGE_MODEL_ROUTING["thinking_model"]),
+        }
+        return {"settings": settings, "model_options": sorted(model_options)}
+
+    @router.patch("/api/settings/image-generation")
+    async def save_image_generation_settings(
+        body: ImageGenerationSettingsUpdateRequest,
+        authorization: str | None = Header(default=None),
+    ):
+        require_admin(authorization)
+        try:
+            settings = config.update_image_generation_settings(body.model_dump(mode="python"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        return {"settings": settings}
 
     @router.get("/api/images")
     async def get_images(request: Request, start_date: str = "", end_date: str = "", authorization: str | None = Header(default=None)):
