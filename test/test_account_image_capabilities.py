@@ -36,6 +36,26 @@ class AccountCapabilityTests(unittest.TestCase):
             self.assertEqual(service._normalize_account_type("prolite"), "ProLite")
             self.assertEqual(service._normalize_account_type("pro_lite"), "ProLite")
 
+    def test_text_account_selection_excludes_codex_only_accounts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service = AccountService(JSONStorageBackend(Path(tmp_dir) / "accounts.json"))
+            service.add_account_items(
+                [
+                    {
+                        "access_token": "token-codex",
+                        "source_type": "codex",
+                        "status": "正常",
+                    },
+                    {
+                        "access_token": "token-web",
+                        "source_type": "web",
+                        "status": "正常",
+                    },
+                ]
+            )
+
+            self.assertEqual(service.get_text_access_token(), "token-web")
+
     def test_search_account_type_ignores_unrelated_scalar_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             service = AccountService(JSONStorageBackend(Path(tmp_dir) / "accounts.json"))

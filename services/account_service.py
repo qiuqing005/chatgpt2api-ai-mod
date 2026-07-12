@@ -1004,6 +1004,7 @@ class AccountService:
                 token
                 for account in self._accounts.values()
                 if account.get("status") not in {"禁用", "异常"}
+                   and self._normalize_source_type(account.get("source_type")) != "codex"
                    and (token := account.get("access_token") or "")
                    and token not in excluded
             ]

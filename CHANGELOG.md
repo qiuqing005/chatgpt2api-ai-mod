@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.7.1 - 2026-07-12
+
++ [新增] 文本模型列表优先读取已登录 ChatGPT Web 账号，支持暴露 `gpt-5.6-sol-wm` 等鉴权模型。
++ [修复] 支持 ChatGPT Web `stream_handoff` WebSocket 续流，避免首段 SSE 提前结束导致回复为空。
+
 ## 1.7.0 - 2026-07-05
 
 + [移除] 移除注册功能、防滥用机制导致封禁GitHub账号。

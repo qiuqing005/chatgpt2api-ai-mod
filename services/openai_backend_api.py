@@ -13,10 +13,11 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from collections.abc import Callable
+from select import select
 from typing import Any, Dict, Iterator, Optional
 from urllib.parse import unquote, urlparse
 
-from curl_cffi import requests
+from curl_cffi import CurlECode, CurlError, CurlInfo, CurlWsFlag, requests
 from PIL import Image
 
 from services.account_service import account_service
@@ -71,6 +72,135 @@ SEARCH_CONVERSATION_ID_RE = re.compile(r'"conversation_id"\s*:\s*"([^"]+)"')
 SEARCH_URL_RE = re.compile(r"https?://[^\s\"'<>）)\]}]+")
 EDITABLE_FILE_MODEL = "gpt-5-5-thinking"
 EDITABLE_FILE_THINKING_EFFORT = "extended"
+WEBSOCKET_URL_PATH = "/backend-api/celsius/ws/user"
+WEBSOCKET_CONNECT_TIMEOUT_SECS = 15.0
+WEBSOCKET_IDLE_TIMEOUT_SECS = 120.0
+WEBSOCKET_TOTAL_TIMEOUT_SECS = 300.0
+
+
+def _stream_handoff_topic(payload: str) -> str:
+    try:
+        event = json.loads(payload)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not isinstance(event, dict) or event.get("type") != "stream_handoff":
+        return ""
+    options = event.get("options")
+    if not isinstance(options, list):
+        return ""
+    for option in options:
+        if not isinstance(option, dict) or option.get("type") != "subscribe_ws_topic":
+            continue
+        topic_id = str(option.get("topic_id") or "").strip()
+        if topic_id:
+            return topic_id
+    return ""
+
+
+def _resume_token_topic(payload: str) -> str:
+    try:
+        event = json.loads(payload)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not isinstance(event, dict) or event.get("type") != "resume_conversation_token":
+        return ""
+    token = str(event.get("token") or "")
+    parts = token.split(".")
+    if len(parts) < 2:
+        return ""
+    try:
+        encoded = parts[1] + "=" * (-len(parts[1]) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(encoded).decode("utf-8"))
+    except Exception:
+        return ""
+    topic_id = str(claims.get("turn_topic_id") or "") if isinstance(claims, dict) else ""
+    return topic_id if topic_id.startswith("conversation-turn-") else ""
+
+
+def _iter_encoded_sse_payloads(encoded: str) -> Iterator[str]:
+    data_lines: list[str] = []
+    for line in str(encoded or "").splitlines():
+        if not line:
+            if data_lines:
+                yield "\n".join(data_lines)
+                data_lines = []
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+    if data_lines:
+        yield "\n".join(data_lines)
+
+
+def _websocket_stream_items(value: Any, topic_id: str) -> tuple[list[str], bool]:
+    encoded_items: list[str] = []
+    done = False
+
+    if isinstance(value, list):
+        for item in value:
+            nested_items, nested_done = _websocket_stream_items(item, topic_id)
+            encoded_items.extend(nested_items)
+            done = done or nested_done
+        return encoded_items, done
+    if not isinstance(value, dict):
+        return encoded_items, done
+
+    reply = value.get("reply")
+    if isinstance(reply, dict):
+        catchups = reply.get("catchups")
+        if isinstance(catchups, list):
+            nested_items, nested_done = _websocket_stream_items(catchups, topic_id)
+            encoded_items.extend(nested_items)
+            done = done or nested_done
+
+    item_topic = str(value.get("topic_id") or "")
+    if item_topic and item_topic != topic_id:
+        return encoded_items, done
+
+    payload = value.get("payload")
+    if value.get("type") == "conversation-turn-stream":
+        envelope = value
+    elif isinstance(payload, dict) and payload.get("type") == "conversation-turn-stream":
+        envelope = payload
+    else:
+        return encoded_items, done
+
+    inner = envelope.get("payload")
+    if not isinstance(inner, dict):
+        return encoded_items, done
+    if inner.get("type") == "done":
+        return encoded_items, True
+    if inner.get("type") != "stream-item":
+        return encoded_items, done
+    encoded = inner.get("encoded_item")
+    if isinstance(encoded, str) and encoded:
+        encoded_items.append(encoded)
+    return encoded_items, done
+
+
+def _recv_websocket_message(websocket: Any, timeout_secs: float) -> tuple[bytes, int]:
+    deadline = time.monotonic() + max(0.1, float(timeout_secs))
+    chunks: list[bytes] = []
+    flags = 0
+    socket_fd = websocket.curl.getinfo(CurlInfo.ACTIVESOCKET)
+    if not isinstance(socket_fd, int) or socket_fd < 0:
+        raise RuntimeError("websocket handoff has no active socket")
+
+    while True:
+        try:
+            chunk, frame = websocket.recv_fragment()
+        except CurlError as exc:
+            if exc.code != CurlECode.AGAIN:
+                raise RuntimeError(f"websocket handoff receive failed ({exc.__class__.__name__})") from None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("websocket handoff timed out") from None
+            select([socket_fd], [], [], min(0.5, remaining))
+            continue
+
+        flags = int(frame.flags)
+        chunks.append(chunk)
+        if frame.bytesleft == 0 and flags & CurlWsFlag.CONT == 0:
+            return b"".join(chunks), flags
 
 
 def resolve_image_backend_route(model: str) -> tuple[str, str]:
@@ -2598,10 +2728,134 @@ class OpenAIBackendAPI:
             stream=True,
         )
         ensure_ok(response, path)
+        handoff_topic = ""
         try:
-            yield from iter_sse_payloads(response)
+            for payload in iter_sse_payloads(response):
+                if payload == "[DONE]":
+                    if not handoff_topic:
+                        yield payload
+                    break
+                handoff_topic = handoff_topic or _stream_handoff_topic(payload) or _resume_token_topic(payload)
+                yield payload
         finally:
             response.close()
+        if handoff_topic:
+            yield from self._stream_websocket_topic(handoff_topic)
+
+    def _get_websocket_url(self) -> str:
+        response = self.session.get(
+            self.base_url + WEBSOCKET_URL_PATH,
+            headers=self._headers(WEBSOCKET_URL_PATH, {"Accept": "application/json"}),
+            timeout=WEBSOCKET_CONNECT_TIMEOUT_SECS,
+        )
+        try:
+            if response.status_code != 200:
+                raise RuntimeError(f"websocket URL request failed: HTTP {response.status_code}")
+            try:
+                websocket_url = str(response.json().get("websocket_url") or "").strip()
+            except Exception:
+                raise RuntimeError("websocket URL response was invalid") from None
+        finally:
+            response.close()
+        if not websocket_url:
+            raise RuntimeError("websocket URL response did not include websocket_url")
+        parsed_websocket_url = urlparse(websocket_url)
+        if parsed_websocket_url.scheme.lower() != "wss" or not parsed_websocket_url.hostname:
+            raise RuntimeError("websocket URL response was not a secure WebSocket URL")
+        return websocket_url
+
+    def _stream_websocket_topic(self, topic_id: str) -> Iterator[str]:
+        profile = proxy_settings.get_profile(account=self.account)
+        websocket_kwargs: dict[str, Any] = {
+            "timeout": WEBSOCKET_CONNECT_TIMEOUT_SECS,
+            "headers": {"User-Agent": self.user_agent, "Origin": self.base_url},
+            "verify": not profile.skip_ssl_verify,
+            "impersonate": self.fp["impersonate"],
+            "default_headers": False,
+            "allow_redirects": False,
+        }
+        if profile.proxy_url:
+            websocket_kwargs["proxy"] = profile.proxy_url
+
+        ws = None
+        for attempt in range(2):
+            websocket_url = self._get_websocket_url()
+            candidate = requests.WebSocket()
+            try:
+                candidate.connect(websocket_url, **websocket_kwargs)
+            except Exception as exc:
+                try:
+                    candidate.close()
+                except Exception:
+                    pass
+                if attempt == 0:
+                    continue
+                raise RuntimeError(f"websocket handoff connection failed ({exc.__class__.__name__})") from None
+            ws = candidate
+            break
+        if ws is None:
+            raise RuntimeError("websocket handoff connection failed")
+
+        completed = False
+        try:
+            try:
+                ws.send_str(json.dumps(
+                    [
+                        {
+                            "id": 1,
+                            "command": {
+                                "type": "connect",
+                                "presence": {"type": "presence", "state": "foreground"},
+                            },
+                        },
+                        {
+                            "id": 2,
+                            "command": {"type": "subscribe", "topic_id": topic_id, "offset": "0"},
+                        },
+                    ],
+                    separators=(",", ":"),
+                ))
+            except Exception as exc:
+                raise RuntimeError(f"websocket handoff subscribe failed ({exc.__class__.__name__})") from None
+            deadline = time.monotonic() + WEBSOCKET_TOTAL_TIMEOUT_SECS
+            while not completed:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("websocket handoff exceeded total timeout")
+                try:
+                    raw_bytes, flags = _recv_websocket_message(
+                        ws,
+                        min(WEBSOCKET_IDLE_TIMEOUT_SECS, remaining),
+                    )
+                except TimeoutError:
+                    raise RuntimeError("websocket handoff timed out") from None
+                if flags & CurlWsFlag.CLOSE:
+                    break
+                raw = raw_bytes.decode("utf-8", errors="ignore")
+                if not raw:
+                    continue
+                try:
+                    message = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                encoded_items, structured_done = _websocket_stream_items(message, topic_id)
+                for encoded in encoded_items:
+                    for payload in _iter_encoded_sse_payloads(encoded):
+                        if payload == "[DONE]":
+                            completed = True
+                            break
+                        yield payload
+                    if completed:
+                        break
+                completed = completed or structured_done
+        finally:
+            try:
+                ws.close()
+            except Exception:
+                pass
+        if not completed:
+            raise RuntimeError("websocket handoff closed before completion")
+        yield "[DONE]"
 
     def _report_progress(self, step: str) -> None:
         """Report progress step to the callback if set."""

@@ -696,7 +696,12 @@ def text_backend() -> OpenAIBackendAPI:
 
 def stream_text_deltas(backend: OpenAIBackendAPI, request: ConversationRequest) -> Iterator[str]:
     attempted_tokens: set[str] = set()
-    token = getattr(backend, "access_token", "")
+    preferred_token = ""
+    if request.model == "gpt-5.6-sol-wm":
+        from services.protocol.openai_v1_models import preferred_access_token_for_model
+
+        preferred_token = preferred_access_token_for_model(request.model)
+    token = preferred_token or getattr(backend, "access_token", "")
     emitted = False
     while True:
         if token and token in attempted_tokens:

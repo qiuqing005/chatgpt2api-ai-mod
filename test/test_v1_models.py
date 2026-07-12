@@ -30,6 +30,175 @@ class FakeResponse:
 
 
 class ModelListTests(unittest.TestCase):
+    def setUp(self):
+        openai_v1_models._clear_models_cache()
+
+    def test_list_models_uses_authenticated_web_account(self):
+        created_tokens: list[str] = []
+
+        class FakeBackend:
+            def __init__(self, access_token: str = "") -> None:
+                created_tokens.append(access_token)
+
+            def list_models(self) -> dict:
+                models = ["gpt-5.6-sol-wm"] if created_tokens[-1] else ["auto"]
+                return {
+                    "object": "list",
+                    "data": [{"id": model} for model in models],
+                }
+
+            def close(self) -> None:
+                return None
+
+        with (
+            mock.patch.object(openai_v1_models, "OpenAIBackendAPI", FakeBackend),
+            mock.patch.object(
+                openai_v1_models.account_service,
+                "list_accounts",
+                return_value=[
+                    {
+                        "access_token": "token-web-pro",
+                        "type": "Pro",
+                        "source_type": "web",
+                        "status": "正常",
+                    },
+                ],
+            ),
+            mock.patch.object(
+                openai_v1_models.account_service,
+                "refresh_access_token",
+                return_value="token-web-pro",
+            ),
+        ):
+            result = openai_v1_models.list_models()
+
+        self.assertEqual(created_tokens, ["token-web-pro"])
+        self.assertIn("gpt-5.6-sol-wm", {item["id"] for item in result["data"]})
+
+    def test_list_models_falls_back_to_anonymous_when_web_account_fails(self):
+        created_tokens: list[str] = []
+
+        class FakeBackend:
+            def __init__(self, access_token: str = "") -> None:
+                self.access_token = access_token
+                created_tokens.append(access_token)
+
+            def list_models(self) -> dict:
+                if self.access_token:
+                    raise RuntimeError("authenticated models unavailable")
+                return {"object": "list", "data": [{"id": "auto"}]}
+
+            def close(self) -> None:
+                return None
+
+        with (
+            mock.patch.object(openai_v1_models, "OpenAIBackendAPI", FakeBackend),
+            mock.patch.object(
+                openai_v1_models.account_service,
+                "list_accounts",
+                return_value=[
+                    {
+                        "access_token": "token-web-pro",
+                        "type": "Pro",
+                        "source_type": "web",
+                        "status": "正常",
+                    },
+                ],
+            ),
+            mock.patch.object(
+                openai_v1_models.account_service,
+                "refresh_access_token",
+                return_value="token-web-pro",
+            ),
+        ):
+            result = openai_v1_models.list_models()
+            second = openai_v1_models.list_models()
+
+        self.assertEqual(created_tokens, ["token-web-pro", ""])
+        self.assertEqual([item["id"] for item in result["data"]], ["auto", "gpt-image-2"])
+        self.assertEqual([item["id"] for item in second["data"]], ["auto", "gpt-image-2"])
+
+    def test_list_models_falls_back_when_token_refresh_fails(self):
+        created_tokens: list[str] = []
+
+        class FakeBackend:
+            def __init__(self, access_token: str = "") -> None:
+                created_tokens.append(access_token)
+
+            def list_models(self) -> dict:
+                return {"object": "list", "data": [{"id": "auto"}]}
+
+            def close(self) -> None:
+                return None
+
+        with (
+            mock.patch.object(openai_v1_models, "OpenAIBackendAPI", FakeBackend),
+            mock.patch.object(
+                openai_v1_models.account_service,
+                "list_accounts",
+                return_value=[
+                    {
+                        "access_token": "token-web-pro",
+                        "type": "Pro",
+                        "source_type": "web",
+                        "status": "正常",
+                    },
+                ],
+            ),
+            mock.patch.object(
+                openai_v1_models.account_service,
+                "refresh_access_token",
+                side_effect=RuntimeError("refresh failed"),
+            ),
+        ):
+            result = openai_v1_models.list_models()
+
+        self.assertEqual(created_tokens, [""])
+        self.assertEqual([item["id"] for item in result["data"]], ["auto", "gpt-image-2"])
+
+    def test_list_models_reuses_authenticated_cache(self):
+        created_tokens: list[str] = []
+
+        class FakeBackend:
+            def __init__(self, access_token: str = "") -> None:
+                created_tokens.append(access_token)
+
+            def list_models(self) -> dict:
+                return {"object": "list", "data": [{"id": "gpt-5.6-sol-wm"}]}
+
+            def close(self) -> None:
+                return None
+
+        account = {
+            "access_token": "token-web-pro",
+            "type": "Pro",
+            "source_type": "web",
+            "status": "正常",
+        }
+        with (
+            mock.patch.object(openai_v1_models, "OpenAIBackendAPI", FakeBackend),
+            mock.patch.object(openai_v1_models.account_service, "list_accounts", return_value=[account]),
+            mock.patch.object(
+                openai_v1_models.account_service,
+                "refresh_access_token",
+                return_value="token-web-pro",
+            ),
+            mock.patch.object(
+                openai_v1_models.account_service,
+                "resolve_access_token",
+                return_value="token-web-pro",
+            ),
+            mock.patch.object(openai_v1_models.account_service, "get_account", return_value=account),
+        ):
+            first = openai_v1_models.list_models()
+            first["data"].clear()
+            second = openai_v1_models.list_models()
+            preferred = openai_v1_models.preferred_access_token_for_model("gpt-5.6-sol-wm")
+
+        self.assertEqual(created_tokens, ["token-web-pro"])
+        self.assertIn("gpt-5.6-sol-wm", {item["id"] for item in second["data"]})
+        self.assertEqual(preferred, "token-web-pro")
+
     def test_list_models_only_returns_image_models_backed_by_account_types(self):
         with (
             mock.patch.object(
