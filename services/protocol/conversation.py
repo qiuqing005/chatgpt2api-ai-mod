@@ -695,12 +695,15 @@ def text_backend() -> OpenAIBackendAPI:
 
 
 def stream_text_deltas(backend: OpenAIBackendAPI, request: ConversationRequest) -> Iterator[str]:
+    from services.protocol.text_model_aliases import resolve_text_backend_route
+
+    backend_model, backend_effort = resolve_text_backend_route(request.model, request.thinking_effort)
     attempted_tokens: set[str] = set()
     preferred_token = ""
-    if request.model == "gpt-5.6-sol-wm":
+    if backend_model != "auto":
         from services.protocol.openai_v1_models import preferred_access_token_for_model
 
-        preferred_token = preferred_access_token_for_model(request.model)
+        preferred_token = preferred_access_token_for_model(backend_model)
     token = preferred_token or getattr(backend, "access_token", "")
     emitted = False
     while True:
@@ -714,9 +717,9 @@ def stream_text_deltas(backend: OpenAIBackendAPI, request: ConversationRequest) 
             for event in conversation_events(
                 active_backend,
                 messages=request.messages,
-                model=request.model,
+                model=backend_model,
                 prompt=request.prompt,
-                thinking_effort=request.thinking_effort,
+                thinking_effort=backend_effort,
             ):
                 if event.get("type") != "conversation.delta":
                     continue
@@ -734,8 +737,19 @@ def stream_text_deltas(backend: OpenAIBackendAPI, request: ConversationRequest) 
                     token = refreshed_token
                 else:
                     account_service.remove_invalid_token(token, "text_stream")
-                    token = account_service.get_text_access_token(attempted_tokens)
+                    token = (
+                        preferred_access_token_for_model(backend_model, attempted_tokens)
+                        if backend_model != "auto"
+                        else account_service.get_text_access_token(attempted_tokens)
+                    )
                 if token:
+                    continue
+            if not emitted and backend_model != "auto":
+                from services.protocol.openai_v1_models import preferred_access_token_for_model
+
+                next_token = preferred_access_token_for_model(backend_model, attempted_tokens)
+                if next_token:
+                    token = next_token
                     continue
             raise
         finally:

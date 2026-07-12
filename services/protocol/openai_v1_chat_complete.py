@@ -21,6 +21,7 @@ from services.protocol.conversation import (
     stream_text_deltas,
     text_backend,
 )
+from services.protocol.text_model_aliases import normalize_text_thinking_effort
 from services.protocol.web_search_tool import (
     WEB_SEARCH_TOOL_TYPES,
     has_unsupported_tools,
@@ -45,14 +46,7 @@ TOOL_UNAVAILABLE_SYSTEM_MESSAGE = (
 
 
 def normalize_thinking_effort(value: object) -> str:
-    normalized = str(value or "").strip().lower()
-    if normalized in {"", "none"}:
-        return ""
-    if normalized in {"low", "medium", "high"}:
-        return normalized
-    if normalized in {"xhigh", "extended"}:
-        return "extended"
-    return ""
+    return normalize_text_thinking_effort(value)
 
 
 def thinking_effort_from_body(body: dict[str, Any]) -> str:

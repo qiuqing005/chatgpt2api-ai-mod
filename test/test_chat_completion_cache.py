@@ -100,7 +100,7 @@ class ChatCompletionCacheTests(unittest.TestCase):
         ):
             openai_v1_chat_complete.handle(body)
 
-        self.assertEqual(captured_efforts, ["extended"])
+        self.assertEqual(captured_efforts, ["xhigh"])
 
     def test_responses_reasoning_effort_reaches_conversation_request(self) -> None:
         captured_efforts: list[str] = []
@@ -121,7 +121,7 @@ class ChatCompletionCacheTests(unittest.TestCase):
         ):
             openai_v1_response.handle(body)
 
-        self.assertEqual(captured_efforts, ["extended"])
+        self.assertEqual(captured_efforts, ["xhigh"])
 
     def test_repeated_stream_text_completion_replays_cached_chunks(self) -> None:
         calls = 0

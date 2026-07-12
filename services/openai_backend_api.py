@@ -641,14 +641,9 @@ class OpenAIBackendAPI:
 
     @staticmethod
     def _normalize_thinking_effort(value: str) -> str:
-        normalized = str(value or "").strip().lower()
-        if normalized in {"", "none"}:
-            return ""
-        if normalized in {"low", "medium", "high"}:
-            return normalized
-        if normalized in {"xhigh", "extended"}:
-            return "extended"
-        return ""
+        from services.protocol.text_model_aliases import backend_thinking_effort
+
+        return backend_thinking_effort(value)
 
     def _conversation_payload(
             self,

@@ -122,8 +122,9 @@ environment:
 - 兼容 `POST /v1/images/edits` 图片编辑接口
 - 兼容面向图片场景的 `POST /v1/chat/completions`
 - 兼容面向图片场景的 `POST /v1/responses`
-- `GET /v1/models` 返回 `gpt-image-2`、`codex-gpt-image-2`、`auto`、`gpt-5`、`gpt-5-1`、`gpt-5-2`、`gpt-5-3`、`gpt-5-3-mini`、
-  `gpt-5-mini`
+- `GET /v1/models` 只返回稳定别名：`auto`、`gpt-5.3`、`gpt-5.4`、`gpt-5.5`、`gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`、`gpt-5-mini`、`gpt-5-pro`，以及账号实际支持的独立模型和图片模型
+- `gpt-5.4`、`gpt-5.5` 和三个独立的 GPT-5.6 模型可附加 `-low` / `-medium` / `-high` / `-xhigh`；这些后缀只参与后台思考强度映射，不会出现在 `/v1/models`
+- Web 内部 slug `gpt-5-6-thinking` 与通用别名 `gpt-5.6` 均不会在模型列表中展示
 - AI 修改版中，`gpt-image-2` 仅在存在非 Codex Web 账号时公开暴露；`gpt-image-2-low` / `medium` / `high` / `xhigh` 只作为隐藏后缀参与后台映射，详见 [AI_MODIFICATIONS.md](AI_MODIFICATIONS.md)
 - AI 修改的部分仅为web端反代，`gpt-image-2`现在可以在后面添加`-low` / `-medium` / `-high` / `-xhigh` 以使用 `gpt-5-5-思考强度`+`images` 工具，`high` 可以有效提高出图概率，但无法真正的绕过审查，也有可能降低生图模型的准确性
 - 支持通过 `n` 返回多张生成结果 
@@ -135,7 +136,7 @@ environment:
 ### 在线画图功能
 
 - 内置在线画图工作台，支持生成、图片编辑与多图组图编辑
-- 支持 `gpt-image-2`、`codex-gpt-image-2`、`auto`、`gpt-5`、`gpt-5-1`、`gpt-5-2`、`gpt-5-3`、`gpt-5-3-mini`、`gpt-5-mini` 模型选择
+- 支持 `/v1/models` 返回的稳定文本别名与图片模型
 - 编辑模式支持参考图上传
 - 前端支持多图生成交互
 - 本地保存图片会话历史，支持回看、删除和清空
@@ -188,7 +189,7 @@ Authorization: Bearer <auth-key>
 <summary><code>GET /v1/models</code></summary>
 <br>
 
-返回当前暴露的图片模型列表。
+返回当前公开的稳定文本别名与图片模型列表。
 
 ```bash
 curl http://localhost:8000/v1/models \
@@ -201,7 +202,7 @@ curl http://localhost:8000/v1/models \
 
 | 字段   | 说明                                                                                                         |
 |:-----|:-----------------------------------------------------------------------------------------------------------|
-| 返回模型 | `gpt-image-2`、`codex-gpt-image-2`、`auto`、`gpt-5`、`gpt-5-1`、`gpt-5-2`、`gpt-5-3`、`gpt-5-3-mini`、`gpt-5-mini` |
+| 返回模型 | `auto`、可用的 `gpt-5.3` / `gpt-5.4` / `gpt-5.5`、独立的 `gpt-5.6-luna` / `terra` / `sol`、`gpt-5-mini`、`gpt-5-pro` 与图片模型；隐藏思考后缀和 Web 内部 slug 不返回 |
 | 接入场景 | 可接入 Cherry Studio、New API 等上游或客户端                                                                          |
 
 <br>

@@ -68,14 +68,20 @@ The following aliases are intentionally not supported:
 
 `/v1/models` is intentionally kept clean:
 
-- Public model list exposes `gpt-image-2`
-- Hidden suffix models are accepted by the backend but not listed
-- Error messages also avoid listing hidden suffix models as public supported models
+- Public text aliases are limited to stable names such as `gpt-5.3`, `gpt-5.4`, `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-5.6-sol`, `gpt-5-mini`, and `gpt-5-pro`
+- ChatGPT Web slugs such as `gpt-5-6-thinking`, `gpt-5.6-luna-wm`, `gpt-5.6-terra-wm`, `gpt-5.6-sol-wm`, and version-specific mini/pro slugs are not listed
+- `gpt-5.4`, `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` accept hidden `-low`, `-medium`, `-high`, and `-xhigh` suffixes
+- Text suffixes map to the real Web values `min`, `standard`, `extended`, and `max`; the suffix models are accepted by the backend but not listed
+- `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` remain separate public models and route to their matching `-wm` Web slugs
+- The generic Web slug `gpt-5-6-thinking` and compatibility alias `gpt-5.6` are intentionally not listed
+- Public model list also exposes `gpt-image-2` when backed by a Web account; image suffix models remain hidden
+- Error messages avoid listing hidden suffix models as public supported models
 
 ### Model account filtering
 
 The model list now only injects `gpt-image-2` when a non-Codex web account with an access token exists.
 Codex-only accounts continue to expose Codex image models through their existing path.
+Authenticated model discovery merges all eligible Web accounts and keeps a compatible token set for each backend model. Explicit text models rotate only among accounts that advertised that model, while `auto` continues to use the normal account pool.
 
 ### Repository publication changes
 
@@ -97,6 +103,11 @@ This redistribution also includes publication-oriented cleanup:
   - Updated GPT-image-2 backend slug selection.
   - Sends `thinking_effort` only when a hidden suffix requests it.
   - Reads ordinary and thinking image backend slugs from live configuration.
+
+- `services/protocol/text_model_aliases.py`, `services/protocol/openai_v1_models.py`, and `services/protocol/conversation.py`
+  - Collapse versioned Web slugs into stable public aliases.
+  - Keep raw Web slugs and hidden thinking suffixes out of `/v1/models`.
+  - Route text suffixes to the Web model and its accepted thinking-effort value before account selection.
 
 - `services/auth_service.py`, `services/image_task_service.py`, and `api/ai.py`
   - Add per-user image quota enforcement across every supported image protocol.

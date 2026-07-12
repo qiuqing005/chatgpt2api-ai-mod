@@ -2,9 +2,17 @@
 
 ## Unreleased
 
+## 1.8.0 - 2026-07-12
+
++ [调整] 精简 `/v1/models`，隐藏重复的 ChatGPT Web 内部 slug，只公开稳定文本别名。
++ [新增] `gpt-5.4`、`gpt-5.5`、`gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol` 支持隐藏 `-low` / `-medium` / `-high` / `-xhigh` 后缀。
++ [调整] GPT-5.6 仅公开 Luna、Terra、Sol 三个独立模型，不展示 `gpt-5-6-thinking` 和通用 `gpt-5.6`。
++ [修复] 文本思考强度改为上游真实接受的 `min` / `standard` / `extended` / `max`，避免错误参数导致 422。
++ [修复] 合并全部 Web 账号的模型发现结果，显式模型仅在实际支持它的账号间轮询，避免冷缓存、账号能力不同或单账号异常导致 502。
+
 ## 1.7.1 - 2026-07-12
 
-+ [新增] 文本模型列表优先读取已登录 ChatGPT Web 账号，支持暴露 `gpt-5.6-sol-wm` 等鉴权模型。
++ [新增] 文本模型列表优先读取已登录 ChatGPT Web 账号，支持发现 `gpt-5.6-sol-wm` 等鉴权模型。
 + [修复] 支持 ChatGPT Web `stream_handoff` WebSocket 续流，避免首段 SSE 提前结束导致回复为空。
 
 ## 1.7.0 - 2026-07-05
