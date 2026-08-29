@@ -124,16 +124,39 @@ class DatabaseStorageBackend(StorageBackend):
                 elif existing_row.data != serialized_data:
                     existing_row.data = serialized_data
 
-            for key_value, row in existing_rows.items():
-                if key_value not in incoming_keys:
-                    session.delete(row)
-
             session.commit()
         except Exception:
             session.rollback()
             raise
         finally:
             session.close()
+
+    def _delete_rows(
+        self,
+        model: type[AccountModel] | type[AuthKeyModel],
+        values: list[str],
+        key_column: str,
+    ) -> int:
+        normalized = {str(value or "").strip() for value in values if str(value or "").strip()}
+        if not normalized:
+            return 0
+        session = self.Session()
+        try:
+            column = getattr(model, key_column)
+            removed = session.query(model).filter(column.in_(normalized)).delete(synchronize_session=False)
+            session.commit()
+            return int(removed or 0)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def delete_accounts(self, access_tokens: list[str]) -> int:
+        return self._delete_rows(AccountModel, access_tokens, "access_token")
+
+    def delete_auth_keys(self, key_ids: list[str]) -> int:
+        return self._delete_rows(AuthKeyModel, key_ids, "key_id")
 
     def health_check(self) -> dict[str, Any]:
         """健康检查"""

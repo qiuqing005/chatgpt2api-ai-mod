@@ -452,7 +452,7 @@ class AuthService:
             ]
             if len(self._items) == before:
                 return False
-            self._save()
+            self.storage.delete_auth_keys([normalized_id])
             return True
 
     def authenticate(self, raw_key: str) -> dict[str, object] | None:

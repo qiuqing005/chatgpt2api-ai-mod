@@ -49,7 +49,7 @@ def test_save_accounts_preserves_existing_rows_and_updates_only_changed_data(tmp
     assert json.loads(after["token-a"].data)["name"] == "A updated"
 
 
-def test_save_accounts_deletes_only_rows_missing_from_new_snapshot(tmp_path):
+def test_save_accounts_preserves_rows_missing_from_partial_snapshot(tmp_path):
     backend = DatabaseStorageBackend(f"sqlite:///{tmp_path / 'accounts.db'}")
     backend.save_accounts(
         [
@@ -58,13 +58,24 @@ def test_save_accounts_deletes_only_rows_missing_from_new_snapshot(tmp_path):
         ]
     )
     before = _account_rows(backend)
-    token_b_id = before["token-b"].id
+    token_a_id = before["token-a"].id
 
     backend.save_accounts([{"access_token": "token-b", "name": "B"}])
 
     after = _account_rows(backend)
-    assert set(after) == {"token-b"}
-    assert after["token-b"].id == token_b_id
+    assert set(after) == {"token-a", "token-b"}
+    assert after["token-a"].id == token_a_id
+
+
+def test_delete_accounts_is_explicit(tmp_path):
+    backend = DatabaseStorageBackend(f"sqlite:///{tmp_path / 'accounts.db'}")
+    backend.save_accounts([
+        {"access_token": "token-a", "name": "A"},
+        {"access_token": "token-b", "name": "B"},
+    ])
+
+    assert backend.delete_accounts(["token-a"]) == 1
+    assert [item["access_token"] for item in backend.load_accounts()] == ["token-b"]
 
 
 def test_save_accounts_rejects_duplicate_tokens_and_rolls_back(tmp_path):
@@ -157,3 +168,17 @@ def test_save_auth_keys_rejects_duplicate_ids_and_rolls_back(tmp_path):
 
     assert "key-a" not in str(exc_info.value)
     assert backend.load_auth_keys() == [original]
+
+
+def test_save_auth_keys_preserves_missing_partial_rows(tmp_path):
+    backend = DatabaseStorageBackend(f"sqlite:///{tmp_path / 'auth-keys.db'}")
+    backend.save_auth_keys([
+        {"id": "key-a", "name": "A"},
+        {"id": "key-b", "name": "B"},
+    ])
+
+    backend.save_auth_keys([{"id": "key-a", "name": "A updated"}])
+
+    assert {item["id"] for item in backend.load_auth_keys()} == {"key-a", "key-b"}
+    assert backend.delete_auth_keys(["key-b"]) == 1
+    assert [item["id"] for item in backend.load_auth_keys()] == ["key-a"]

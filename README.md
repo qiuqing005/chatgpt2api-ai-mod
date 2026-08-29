@@ -25,6 +25,20 @@
 > - 使用本项目即视为你已充分理解并同意本免责声明全部内容；如因滥用、违规或违法使用造成任何后果，均由使用者自行承担。
 > - 本项目基于对 ChatGPT 官网相关能力的逆向研究实现，存在账号受限、临时封禁或永久封禁的风险。请勿使用你自己的重要账号、常用账号或高价值账号进行测试。
 
+
+## 赞助商
+
+<table>
+  <tr>
+    <td width="190" align="center">
+      <a href="https://www.atlascloud.ai/zh?utm_source=github&utm_medium=link&utm_campaign=chatgpt2api"><img src="assets/atlascloud.svg" width="163" alt="Atlas Cloud"></a>
+    </td>
+    <td>
+      <a href="https://www.atlascloud.ai/zh?utm_source=github&utm_medium=link&utm_campaign=chatgpt2api">Atlas Cloud</a> is a full-modal AI inference platform that gives developers a single AI API to access video generation, image generation, and LLM APIs. Instead of managing multiple vendor integrations, you connect once and get unified access to 300+ curated models across all modalities. Check out <a href="https://www.atlascloud.ai/console/coding-plan">Atlas Cloud's new coding plan promotion</a> for more budget-friendly API access.
+    </td>
+  </tr>
+</table>
+
 ## 快速开始
 
 ### Docker 运行
@@ -126,6 +140,7 @@ environment:
 - `gpt-5.4`、`gpt-5.5` 和三个独立的 GPT-5.6 模型可附加 `-low` / `-medium` / `-high` / `-xhigh`；这些后缀只参与后台思考强度映射，不会出现在 `/v1/models`
 - Web 内部 slug `gpt-5-6-thinking` 与通用别名 `gpt-5.6` 均不会在模型列表中展示
 - AI 修改版中，`gpt-image-2` 仅在存在非 Codex Web 账号时公开暴露；`gpt-image-2-low` / `medium` / `high` / `xhigh` 只作为隐藏后缀参与后台映射，详见 [AI_MODIFICATIONS.md](AI_MODIFICATIONS.md)
+- 管理员可在 Web 设置的「可见模型」中按需勾选、隐藏、添加或恢复默认模型列表。`visible_models: null` 时保持自动发现；保存自定义列表后只影响 `/v1/models` 的展示，不会删除账号或改变后端路由能力
 - AI 修改的部分仅为web端反代，`gpt-image-2`现在可以在后面添加`-low` / `-medium` / `-high` / `-xhigh` 以使用 `gpt-5-5-思考强度`+`images` 工具，`high` 可以有效提高出图概率，但无法真正的绕过审查，也有可能降低生图模型的准确性
 - 支持通过 `n` 返回多张生成结果 
 - 支持生成可编辑 PPT 文件

@@ -91,12 +91,28 @@ class GitStorageBackend(StorageBackend):
             raise
 
     def save_accounts(self, accounts: list[dict[str, Any]]) -> None:
-        """保存账号数据到 Git 仓库"""
+        """增量 upsert 账号数据，不因不完整内存快照删除旧账号。"""
         try:
-            self._save_json_file(self.file_path, accounts, "Update accounts data")
+            existing = self._load_json_file(self.file_path)
+            merged = {str(item.get("access_token") or "").strip(): item for item in existing if str(item.get("access_token") or "").strip()}
+            for item in accounts:
+                if isinstance(item, dict) and (token := str(item.get("access_token") or "").strip()):
+                    merged[token] = item
+            self._save_json_file(self.file_path, list(merged.values()), "Update accounts data")
         except Exception as e:
             print(f"[git-storage] save failed: {e}")
             raise e
+
+    def delete_accounts(self, access_tokens: list[str]) -> int:
+        tokens = {str(token or "").strip() for token in access_tokens if str(token or "").strip()}
+        if not tokens:
+            return 0
+        existing = self._load_json_file(self.file_path)
+        remaining = [item for item in existing if str(item.get("access_token") or "").strip() not in tokens]
+        removed = len(existing) - len(remaining)
+        if removed:
+            self._save_json_file(self.file_path, remaining, "Delete accounts data")
+        return removed
 
     def load_auth_keys(self) -> list[dict[str, Any]]:
         """从 Git 仓库加载鉴权密钥数据"""
@@ -110,12 +126,28 @@ class GitStorageBackend(StorageBackend):
             raise
 
     def save_auth_keys(self, auth_keys: list[dict[str, Any]]) -> None:
-        """保存鉴权密钥数据到 Git 仓库"""
+        """增量 upsert 鉴权密钥，不因不完整内存快照删除旧密钥。"""
         try:
-            self._save_json_file(self.auth_keys_file_path, {"items": auth_keys}, "Update auth keys data")
+            existing = self.load_auth_keys()
+            merged = {str(item.get("id") or "").strip(): item for item in existing if str(item.get("id") or "").strip()}
+            for item in auth_keys:
+                if isinstance(item, dict) and (key_id := str(item.get("id") or "").strip()):
+                    merged[key_id] = item
+            self._save_json_file(self.auth_keys_file_path, {"items": list(merged.values())}, "Update auth keys data")
         except Exception as e:
             print(f"[git-storage] save failed: {e}")
             raise e
+
+    def delete_auth_keys(self, key_ids: list[str]) -> int:
+        ids = {str(key_id or "").strip() for key_id in key_ids if str(key_id or "").strip()}
+        if not ids:
+            return 0
+        existing = self.load_auth_keys()
+        remaining = [item for item in existing if str(item.get("id") or "").strip() not in ids]
+        removed = len(existing) - len(remaining)
+        if removed:
+            self._save_json_file(self.auth_keys_file_path, {"items": remaining}, "Delete auth keys data")
+        return removed
 
     def _load_json_file(self, file_path: str) -> list[dict[str, Any]]:
         data = self._load_json_value(file_path)

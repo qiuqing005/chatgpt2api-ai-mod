@@ -219,6 +219,15 @@ tar -czf backups/chatgpt2api-$(date +%Y%m%d-%H%M%S).tgz config.json data
 cd chatgpt2api-ai-mod
 ```
 
+升级时使用带版本的镜像或 `latest` 标签，并保留现有 `config.json` 与 `data/` 挂载目录。不要用仓库里的配置模板覆盖生产配置：
+
+```bash
+docker compose pull
+docker compose up -d --remove-orphans
+```
+
+账号存储采用增量保存，普通保存不会删除数据库或 JSON 中缺失于本次内存快照的账号；删除账号请使用后台显式删除操作。
+
 备份：
 
 ```bash

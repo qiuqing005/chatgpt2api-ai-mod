@@ -122,6 +122,9 @@ function normalizeThirdPartyApps(value: unknown): ThirdPartyAppsSettings {
 }
 
 function normalizeConfig(config: SettingsConfig): SettingsConfig {
+  const defaultThinkingEffort = ["standard", "extended", "max"].includes(String(config.default_thinking_effort))
+    ? config.default_thinking_effort as "standard" | "extended" | "max"
+    : "auto";
   const imageStorage = typeof config.image_storage === "object" && config.image_storage
     ? config.image_storage as ImageStorageSettings
     : {
@@ -172,6 +175,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     image_settle_enabled: Boolean(config.image_settle_enabled !== false),
     image_check_before_hit_enabled: Boolean(config.image_check_before_hit_enabled !== false),
     image_remove_conversation_after_result: Boolean(config.image_remove_conversation_after_result),
+    image_remove_conversation_always: Boolean(config.image_remove_conversation_always),
     image_settle_secs: Number(config.image_settle_secs || 2.0),
     image_timeout_retry_secs: Number(config.image_timeout_retry_secs || 30),
     auto_remove_invalid_accounts: Boolean(config.auto_remove_invalid_accounts),
@@ -181,6 +185,11 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     proxy: typeof config.proxy === "string" ? config.proxy : "",
     base_url: typeof config.base_url === "string" ? config.base_url : "",
     global_system_prompt: String(config.global_system_prompt || ""),
+    default_upstream_model_name: String(config.default_upstream_model_name || "gpt-5-5"),
+    visible_models: Array.isArray(config.visible_models)
+      ? Array.from(new Set(config.visible_models.map((item) => String(item).trim()).filter(Boolean)))
+      : null,
+    default_thinking_effort: defaultThinkingEffort,
     sensitive_words: Array.isArray(config.sensitive_words) ? config.sensitive_words : [],
     ai_review: {
       enabled: Boolean(config.ai_review?.enabled),
@@ -292,6 +301,7 @@ type SettingsStore = {
   setImageSettleEnabled: (value: boolean) => void;
   setImageCheckBeforeHitEnabled: (value: boolean) => void;
   setImageRemoveConversationAfterResult: (value: boolean) => void;
+  setImageRemoveConversationAlways: (value: boolean) => void;
   setImageSettleSecs: (value: string) => void;
   setImageTimeoutRetrySecs: (value: string) => void;
   setAutoRemoveInvalidAccounts: (value: boolean) => void;
@@ -301,6 +311,9 @@ type SettingsStore = {
   setProxy: (value: string) => void;
   setBaseUrl: (value: string) => void;
   setGlobalSystemPrompt: (value: string) => void;
+  setDefaultUpstreamModelName: (value: string) => void;
+  setDefaultThinkingEffort: (value: "auto" | "standard" | "extended" | "max") => void;
+  setVisibleModels: (value: string[] | null) => void;
   setSensitiveWordsText: (value: string) => void;
   setAIReviewField: (key: "enabled" | "base_url" | "api_key" | "model" | "prompt", value: string | boolean) => void;
   setImageStorageField: (key: keyof ImageStorageSettings, value: string | boolean) => void;
@@ -417,6 +430,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         image_settle_enabled: Boolean(config.image_settle_enabled !== false),
         image_check_before_hit_enabled: Boolean(config.image_check_before_hit_enabled !== false),
         image_remove_conversation_after_result: Boolean(config.image_remove_conversation_after_result),
+        image_remove_conversation_always: Boolean(config.image_remove_conversation_always),
         image_settle_secs: Math.max(0.5, Number(config.image_settle_secs) || 2.0),
         image_timeout_retry_secs: Math.max(1, Number(config.image_timeout_retry_secs) || 30),
         auto_remove_invalid_accounts: Boolean(config.auto_remove_invalid_accounts),
@@ -425,6 +439,13 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         proxy: config.proxy.trim(),
         base_url: String(config.base_url || "").trim(),
         global_system_prompt: String(config.global_system_prompt || "").trim(),
+        default_upstream_model_name: String(config.default_upstream_model_name || "gpt-5-5").trim() || "gpt-5-5",
+        default_thinking_effort: ["standard", "extended", "max"].includes(String(config.default_thinking_effort))
+          ? config.default_thinking_effort
+          : "auto",
+        visible_models: config.visible_models === null
+          ? null
+          : Array.from(new Set((config.visible_models || []).map((item) => String(item).trim()).filter(Boolean))),
         sensitive_words: (config.sensitive_words || []).map((item) => String(item).trim()).filter(Boolean),
         ai_review: {
           enabled: Boolean(config.ai_review?.enabled),
@@ -532,6 +553,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     set((state) => state.config ? { config: { ...state.config, image_remove_conversation_after_result: value } } : {});
   },
 
+  setImageRemoveConversationAlways: (value) => {
+    set((state) => state.config ? { config: { ...state.config, image_remove_conversation_always: value } } : {});
+  },
+
   setImageSettleSecs: (value) => {
     set((state) => state.config ? { config: { ...state.config, image_settle_secs: value } } : {});
   },
@@ -592,6 +617,18 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setGlobalSystemPrompt: (value) => {
     set((state) => state.config ? { config: { ...state.config, global_system_prompt: value } } : {});
+  },
+
+  setDefaultUpstreamModelName: (value) => {
+    set((state) => state.config ? { config: { ...state.config, default_upstream_model_name: value } } : {});
+  },
+
+  setDefaultThinkingEffort: (value) => {
+    set((state) => state.config ? { config: { ...state.config, default_thinking_effort: value } } : {});
+  },
+
+  setVisibleModels: (value) => {
+    set((state) => state.config ? { config: { ...state.config, visible_models: value } } : {});
   },
 
   setSensitiveWordsText: (value) => {

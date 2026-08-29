@@ -419,6 +419,7 @@ class AccountService:
             rotated = new_token != old_token
             if rotated:
                 self._accounts.pop(old_token, None)
+                self.storage.delete_accounts([old_token])
                 self._token_aliases[old_token] = new_token
                 old_inflight = int(self._image_inflight.pop(old_token, 0))
                 if old_inflight:
@@ -997,19 +998,39 @@ class AccountService:
             if plan_type or source_type else f"no available image quota (tried {len(attempted_tokens)} tokens)"
         )
 
-    def get_text_access_token(self, excluded_tokens: set[str] | None = None) -> str:
+    def get_text_access_token(
+            self,
+            excluded_tokens: set[str] | None = None,
+            model: str = "auto",
+    ) -> str:
         excluded = set(excluded_tokens or set())
+        requested_model = str(model or "auto").strip() or "auto"
+        route = None
+        if requested_model != "auto":
+            from services.model_service import model_catalog_service
+
+            route = model_catalog_service.route_for_model(requested_model)
         with self._lock:
             candidates = [
                 token
                 for account in self._accounts.values()
                 if account.get("status") not in {"禁用", "异常"}
                    and self._normalize_source_type(account.get("source_type")) != "codex"
+                   and (
+                       route is None
+                       or self._normalize_account_type(account.get("type")) in route.account_types
+                   )
                    and (token := account.get("access_token") or "")
                    and token not in excluded
             ]
             if not candidates:
-                return ""
+                if route is None or route.allow_anonymous:
+                    return ""
+                from services.model_service import ModelUnavailableError
+
+                raise ModelUnavailableError(
+                    f"model {requested_model!r} is not available to any active account"
+                )
             access_token = candidates[self._index % len(candidates)]
             self._index += 1
         return self.refresh_access_token(access_token, event="get_text_access_token") or access_token
@@ -1189,7 +1210,7 @@ class AccountService:
                     self._index %= len(self._accounts)
                 else:
                     self._index = 0
-                self._save_accounts()
+                self.storage.delete_accounts(list(target_set))
                 log_service.add(LOG_TYPE_ACCOUNT, f"删除 {removed} 个账号", {"removed": removed})
             items = [dict(item) for item in self._accounts.values()]
         return {"removed": removed, "items": items}
@@ -1207,7 +1228,7 @@ class AccountService:
                 return None
             if account.get("status") == "限流" and config.auto_remove_rate_limited_accounts:
                 self._accounts.pop(access_token, None)
-                self._save_accounts()
+                self.storage.delete_accounts([access_token])
                 log_service.add(LOG_TYPE_ACCOUNT, "自动移除限流账号", {"token": anonymize_token(access_token)})
                 return None
             self._accounts[access_token] = account
@@ -1305,7 +1326,7 @@ class AccountService:
                 return None
             if account.get("status") == "限流" and config.auto_remove_rate_limited_accounts:
                 self._accounts.pop(access_token, None)
-                self._save_accounts()
+                self.storage.delete_accounts([access_token])
                 log_service.add(LOG_TYPE_ACCOUNT, "自动移除限流账号", {"token": anonymize_token(access_token)})
                 return None
             self._accounts[access_token] = account

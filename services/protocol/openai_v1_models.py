@@ -6,6 +6,8 @@ import time
 from typing import Any
 
 from services.account_service import account_service
+from services.config import config
+from services.model_service import model_catalog_service
 from services.openai_backend_api import OpenAIBackendAPI
 from services.protocol.text_model_aliases import public_text_model_items
 from utils.helper import CODEX_IMAGE_MODEL
@@ -240,7 +242,7 @@ def preferred_access_token_for_model(model: str, excluded_tokens: set[str] | Non
     return ""
 
 
-def list_models() -> dict[str, Any]:
+def list_models(*, apply_visibility: bool = True) -> dict[str, Any]:
     accounts = account_service.list_accounts()
     result = _load_upstream_models(accounts)
     data = result.get("data")
@@ -291,4 +293,22 @@ def list_models() -> dict[str, Any]:
                 "root": model,
                 "parent": None,
             })
+    visible_models = config.visible_models if apply_visibility else None
+    if visible_models is not None:
+        allowed = set(visible_models)
+        data = [item for item in data if str(item.get("id") or "").strip() in allowed]
+        present = {str(item.get("id") or "").strip() for item in data}
+        for model_id in visible_models:
+            if model_id in present:
+                continue
+            data.append({
+                "id": model_id,
+                "object": "model",
+                "created": 0,
+                "owned_by": "chatgpt2api",
+                "permission": [],
+                "root": model_id,
+                "parent": None,
+            })
+    result["data"] = data
     return result

@@ -83,6 +83,19 @@ The model list now only injects `gpt-image-2` when a non-Codex web account with 
 Codex-only accounts continue to expose Codex image models through their existing path.
 Authenticated model discovery merges all eligible Web accounts and keeps a compatible token set for each backend model. Explicit text models rotate only among accounts that advertised that model, while `auto` continues to use the normal account pool.
 
+### Configurable visible models
+
+- The Web settings page can show, hide, add, and restore models returned by `/v1/models`.
+- `visible_models: null` preserves automatic discovery. A saved array is an explicit public allowlist; custom IDs are represented as normal OpenAI model items.
+- The setting only controls discovery output. It does not delete accounts or block a request by itself.
+
+### Account storage safety
+
+- Account and API-key saves are incremental upserts. A partial or temporarily empty in-memory snapshot can no longer delete records.
+- Physical deletion is available only through explicit delete operations, including the existing administrator delete flow.
+- JSON storage writes through an fsync and atomic replace, and refuses to overwrite a malformed existing file during a normal save.
+- The example configuration disables automatic invalid-account deletion by default; invalid accounts remain inspectable until an administrator deletes them.
+
 ### Repository publication changes
 
 This redistribution also includes publication-oriented cleanup:

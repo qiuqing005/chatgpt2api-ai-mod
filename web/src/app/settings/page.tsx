@@ -18,6 +18,7 @@ import { SettingsHeader } from "./components/settings-header";
 import { Sub2APIConnections } from "./components/sub2api-connections";
 import { ThirdPartyAppsCard } from "./components/third-party-apps-card";
 import { UserKeysCard } from "./components/user-keys-card";
+import { VisibleModelsCard } from "./components/visible-models-card";
 import { useSettingsStore } from "./store";
 
 const settingsTabs = [
@@ -93,6 +94,9 @@ function SettingsPageContent() {
         </div>
         <TabsContent value="basic">
           <ConfigCard />
+          <div className="mt-4">
+            <VisibleModelsCard />
+          </div>
         </TabsContent>
         <TabsContent value="image-generation">
           <ImageGenerationSettingsCard />

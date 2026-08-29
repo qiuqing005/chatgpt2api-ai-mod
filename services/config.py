@@ -57,6 +57,7 @@ DEFAULT_IMAGE_MODEL_ROUTING = {
 }
 
 IMAGE_BACKEND_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+VISIBLE_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
 DEFAULT_PROXY_RUNTIME_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -112,6 +113,26 @@ def _normalize_positive_int(value: object, default: int, minimum: int = 0) -> in
     except (OverflowError, TypeError, ValueError):
         normalized = default
     return max(minimum, normalized)
+
+
+def _normalize_visible_models(value: object) -> list[str] | None:
+    """Normalize the optional public model allowlist without changing the default catalog."""
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError("可见模型必须是模型 ID 数组或 null")
+    normalized: list[str] = []
+    for item in value:
+        model = str(item or "").strip()
+        if not model:
+            continue
+        if not VISIBLE_MODEL_RE.fullmatch(model):
+            raise ValueError("可见模型 ID 格式无效")
+        if model not in normalized:
+            normalized.append(model)
+    if len(normalized) > 256:
+        raise ValueError("可见模型最多支持 256 个")
+    return normalized
 
 
 def _normalize_backup_include(value: object) -> dict[str, bool]:
@@ -512,6 +533,11 @@ class ConfigStore:
         return bool(value)
 
     @property
+    def image_remove_conversation_always(self) -> bool:
+        """无论是否出图，画图请求结束后都异步隐藏 ChatGPT 本地对话记录。"""
+        return _normalize_bool(self.data.get("image_remove_conversation_always"), False)
+
+    @property
     def image_settle_secs(self) -> float:
         """二次确认等待时间（秒）。"""
         try:
@@ -561,6 +587,20 @@ class ConfigStore:
     @property
     def global_system_prompt(self) -> str:
         return str(self.data.get("global_system_prompt") or "").strip()
+
+    @property
+    def default_upstream_model_name(self) -> str:
+        return str(self.data.get("default_upstream_model_name") or "gpt-5-5").strip()
+
+    @property
+    def default_thinking_effort(self) -> str:
+        value = str(self.data.get("default_thinking_effort") or "auto").strip().lower()
+        return value if value in {"auto", "standard", "extended", "max"} else "auto"
+
+    @property
+    def visible_models(self) -> list[str] | None:
+        value = self.data.get("visible_models")
+        return _normalize_visible_models(value)
 
     @property
     def images_dir(self) -> Path:
@@ -614,6 +654,7 @@ class ConfigStore:
         data["image_account_concurrency"] = self.image_account_concurrency
         data["image_parallel_generation"] = self.image_parallel_generation
         data["image_remove_conversation_after_result"] = self.image_remove_conversation_after_result
+        data["image_remove_conversation_always"] = self.image_remove_conversation_always
         data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
         data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts
         data["auto_relogin_after_refresh"] = self.auto_relogin_after_refresh
@@ -621,6 +662,9 @@ class ConfigStore:
         data["sensitive_words"] = self.sensitive_words
         data["ai_review"] = self.ai_review
         data["global_system_prompt"] = self.global_system_prompt
+        data["default_upstream_model_name"] = self.default_upstream_model_name
+        data["default_thinking_effort"] = self.default_thinking_effort
+        data["visible_models"] = self.visible_models
         data["backup"] = self.get_backup_settings()
         data["image_storage"] = self.get_image_storage_settings()
         data["chat_completion_cache"] = self.get_chat_completion_cache_settings()
@@ -667,6 +711,8 @@ class ConfigStore:
             )
         if "third_party_apps" in next_data:
             next_data["third_party_apps"] = _normalize_third_party_apps_settings(next_data.get("third_party_apps"))
+        if "visible_models" in next_data:
+            next_data["visible_models"] = _normalize_visible_models(next_data.get("visible_models"))
         if "proxy_runtime" in next_data:
             incoming_runtime = next_data.get("proxy_runtime")
             if isinstance(incoming_runtime, dict):

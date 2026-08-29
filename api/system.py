@@ -25,6 +25,7 @@ from services.image_storage_service import ImageStorageError, image_storage_serv
 from services.image_tags_service import delete_tag, get_all_tags, set_tags
 from services.log_service import log_service
 from services.proxy_service import proxy_settings, test_clearance, test_proxy
+from services.protocol.openai_v1_models import list_models
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -117,6 +118,15 @@ def create_router(app_version: str) -> APIRouter:
             return {"config": config.update(body.model_dump(mode="python"))}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+
+    @router.get("/api/settings/models")
+    async def get_model_visibility(authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        result = await run_in_threadpool(list_models, apply_visibility=False)
+        return {
+            "visible_models": config.visible_models,
+            "models": result.get("data", []),
+        }
 
     @router.get("/api/settings/image-generation")
     async def get_image_generation_settings(authorization: str | None = Header(default=None)):
