@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from typing import Any
 
-from sqlalchemy import Column, String, Text, create_engine, Integer, text
+from sqlalchemy import Column, Index, Integer, String, Text, create_engine, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -17,8 +18,15 @@ class AccountModel(Base):
     __tablename__ = "accounts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    access_token = Column(String(2048), unique=True, nullable=False, index=True)
+    # Access tokens can exceed a MySQL index's byte limit when stored as utf8mb4.
+    # Keep the full token in TEXT and use a fixed-size digest for identity lookups.
+    access_token = Column(Text, nullable=False)
+    access_token_hash = Column(String(64), nullable=False)
     data = Column(Text, nullable=False)  # JSON 格式存储完整账号数据
+
+    __table_args__ = (
+        Index("uq_accounts_access_token_hash", "access_token_hash", unique=True),
+    )
 
 
 class AuthKeyModel(Base):
@@ -40,8 +48,46 @@ class DatabaseStorageBackend(StorageBackend):
             pool_pre_ping=True,  # 自动检测连接是否有效
             pool_recycle=3600,   # 1小时回收连接
         )
+        self._prepare_account_schema()
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
+
+    def _prepare_account_schema(self) -> None:
+        """Prepare the digest column before SQLAlchemy creates indexes.
+
+        ``create_all`` does not alter an existing table. This small migration keeps
+        older SQLite/PostgreSQL installations readable while allowing new MySQL
+        installations to avoid indexing the full token column.
+        """
+        inspector = inspect(self.engine)
+        if "accounts" not in inspector.get_table_names():
+            return
+
+        columns = {column["name"] for column in inspector.get_columns("accounts")}
+        if "access_token_hash" not in columns:
+            with self.engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE accounts ADD COLUMN access_token_hash VARCHAR(64)")
+                )
+
+        with self.engine.begin() as connection:
+            rows = connection.execute(
+                text(
+                    "SELECT id, access_token FROM accounts "
+                    "WHERE access_token_hash IS NULL OR access_token_hash = ''"
+                )
+            ).fetchall()
+            for row_id, access_token in rows:
+                connection.execute(
+                    text(
+                        "UPDATE accounts SET access_token_hash = :token_hash "
+                        "WHERE id = :row_id"
+                    ),
+                    {
+                        "token_hash": self._token_hash(str(access_token or "")),
+                        "row_id": row_id,
+                    },
+                )
 
     def load_accounts(self) -> list[dict[str, Any]]:
         """从数据库加载账号数据"""
@@ -61,7 +107,49 @@ class DatabaseStorageBackend(StorageBackend):
 
     def save_accounts(self, accounts: list[dict[str, Any]]) -> None:
         """保存账号数据到数据库"""
-        self._save_rows(AccountModel, accounts, "access_token")
+        session = self.Session()
+        try:
+            existing_rows = session.query(AccountModel).all()
+            existing_by_hash = {
+                row.access_token_hash or self._token_hash(row.access_token): row
+                for row in existing_rows
+            }
+            existing_by_token = {row.access_token: row for row in existing_rows}
+            incoming_keys: set[str] = set()
+
+            for item in accounts:
+                if not isinstance(item, dict):
+                    continue
+                access_token = str(item.get("access_token") or "").strip()
+                if not access_token:
+                    continue
+                token_hash = self._token_hash(access_token)
+                if token_hash in incoming_keys:
+                    raise ValueError("Duplicate access_token in storage snapshot")
+
+                incoming_keys.add(token_hash)
+                serialized_data = json.dumps(item, ensure_ascii=False)
+                existing_row = existing_by_hash.get(token_hash) or existing_by_token.get(access_token)
+                if existing_row is None:
+                    session.add(
+                        AccountModel(
+                            access_token=access_token,
+                            access_token_hash=token_hash,
+                            data=serialized_data,
+                        )
+                    )
+                else:
+                    existing_row.access_token = access_token
+                    existing_row.access_token_hash = token_hash
+                    if existing_row.data != serialized_data:
+                        existing_row.data = serialized_data
+
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     def load_auth_keys(self) -> list[dict[str, Any]]:
         """从数据库加载鉴权密钥数据"""
@@ -157,6 +245,10 @@ class DatabaseStorageBackend(StorageBackend):
 
     def delete_auth_keys(self, key_ids: list[str]) -> int:
         return self._delete_rows(AuthKeyModel, key_ids, "key_id")
+
+    @staticmethod
+    def _token_hash(access_token: str) -> str:
+        return hashlib.sha256(access_token.encode("utf-8")).hexdigest()
 
     def health_check(self) -> dict[str, Any]:
         """健康检查"""

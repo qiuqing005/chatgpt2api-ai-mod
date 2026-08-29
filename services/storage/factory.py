@@ -14,8 +14,8 @@ def create_storage_backend(data_dir: Path) -> StorageBackend:
     根据环境变量创建存储后端
     
     环境变量：
-    - STORAGE_BACKEND: json|sqlite|postgres|git (默认 json)
-    - DATABASE_URL: 数据库连接字符串 (用于 sqlite/postgres)
+    - STORAGE_BACKEND: json|sqlite|postgres|mysql|git (默认 json)
+    - DATABASE_URL: 数据库连接字符串 (用于 sqlite/postgres/mysql)
     - GIT_REPO_URL: Git 仓库地址 (用于 git)
     - GIT_TOKEN: Git 访问令牌 (用于 git)
     - GIT_BRANCH: Git 分支 (默认 main)
@@ -74,7 +74,7 @@ def create_storage_backend(data_dir: Path) -> StorageBackend:
     else:
         raise ValueError(
             f"Unknown storage backend: {backend_type}. "
-            f"Supported backends: json, sqlite, postgres, git"
+            f"Supported backends: json, sqlite, postgres, mysql, git"
         )
 
 

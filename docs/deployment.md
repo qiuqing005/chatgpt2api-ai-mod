@@ -176,6 +176,7 @@ STORAGE_BACKEND=json
 | `json` | 本地 JSON 文件，默认方式 |
 | `sqlite` | 本地 SQLite，通常存放在 `data/accounts.db` |
 | `postgres` | 外部 PostgreSQL |
+| `mysql` | 外部 MySQL，使用 `mysql+pymysql://...` 连接 |
 | `git` | Git 私有仓库存储账号数据 |
 
 PostgreSQL 示例：
@@ -193,6 +194,16 @@ environment:
   - STORAGE_BACKEND=sqlite
   - DATABASE_URL=sqlite:////app/data/accounts.db
 ```
+
+MySQL 示例：
+
+```yaml
+environment:
+  - STORAGE_BACKEND=mysql
+  - DATABASE_URL=mysql+pymysql://chatgpt2api:password@mysql:3306/chatgpt2api?charset=utf8mb4
+```
+
+建议在已有 MySQL 实例中为本项目创建独立数据库和专用用户，不要直接使用 `newapi` 数据库。
 
 ## 升级前备份
 

@@ -78,6 +78,47 @@ def test_delete_accounts_is_explicit(tmp_path):
     assert [item["access_token"] for item in backend.load_accounts()] == ["token-b"]
 
 
+def test_save_accounts_supports_long_tokens_without_indexing_full_value(tmp_path):
+    backend = DatabaseStorageBackend(f"sqlite:///{tmp_path / 'long-token.db'}")
+    long_token = "token-" + ("x" * 5000)
+
+    backend.save_accounts([{"access_token": long_token, "name": "long"}])
+
+    assert backend.load_accounts() == [{"access_token": long_token, "name": "long"}]
+    session = backend.Session()
+    try:
+        row = session.query(AccountModel).one()
+        assert len(row.access_token_hash) == 64
+    finally:
+        session.close()
+
+
+def test_existing_accounts_table_gets_token_hash_column(tmp_path):
+    from sqlalchemy import create_engine, text
+
+    database_url = f"sqlite:///{tmp_path / 'legacy.db'}"
+    engine = create_engine(database_url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE accounts ("
+                "id INTEGER PRIMARY KEY, access_token TEXT NOT NULL, data TEXT NOT NULL)"
+            )
+        )
+        connection.execute(
+            text("INSERT INTO accounts (id, access_token, data) VALUES (1, 'legacy-token', '{}')")
+        )
+
+    backend = DatabaseStorageBackend(database_url)
+
+    session = backend.Session()
+    try:
+        row = session.query(AccountModel).one()
+        assert len(row.access_token_hash) == 64
+    finally:
+        session.close()
+
+
 def test_save_accounts_rejects_duplicate_tokens_and_rolls_back(tmp_path):
     backend = DatabaseStorageBackend(f"sqlite:///{tmp_path / 'accounts.db'}")
     original = {"access_token": "token-a", "name": "A"}

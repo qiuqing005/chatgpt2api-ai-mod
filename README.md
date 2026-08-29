@@ -118,6 +118,7 @@ docker compose up -d
 - `json` - 本地 JSON 文件（默认）
 - `sqlite` - 本地 SQLite 数据库
 - `postgres` - 外部 PostgreSQL（需配置 `DATABASE_URL`）
+- `mysql` - 外部 MySQL（需配置 `DATABASE_URL=mysql+pymysql://...`）
 - `git` - Git 私有仓库（需配置 `GIT_REPO_URL` 和 `GIT_TOKEN`）
 
 示例：使用 PostgreSQL
@@ -126,6 +127,14 @@ docker compose up -d
 environment:
   - STORAGE_BACKEND=postgres
   - DATABASE_URL=postgresql://user:password@host:5432/dbname
+```
+
+MySQL 示例（建议使用独立数据库和专用用户，不要复用其他应用的业务库）：
+
+```yaml
+environment:
+  - STORAGE_BACKEND=mysql
+  - DATABASE_URL=mysql+pymysql://chatgpt2api:password@mysql:3306/chatgpt2api?charset=utf8mb4
 ```
 
 ## 功能

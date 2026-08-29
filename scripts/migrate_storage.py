@@ -4,6 +4,7 @@
 
 用法：
   python scripts/migrate_storage.py --from json --to postgres
+  python scripts/migrate_storage.py --from json --to mysql
   python scripts/migrate_storage.py --from postgres --to git
   python scripts/migrate_storage.py --export accounts.json
   python scripts/migrate_storage.py --import accounts.json
@@ -76,13 +77,21 @@ def migrate_data(from_backend: str, to_backend: str):
         os.environ["STORAGE_BACKEND"] = from_backend
         from_storage = create_storage_backend(DATA_DIR)
         accounts = from_storage.load_accounts()
-        print(f"[migrate] Loaded {len(accounts)} accounts from {from_backend}")
+        auth_keys = from_storage.load_auth_keys()
+        print(
+            f"[migrate] Loaded {len(accounts)} accounts and "
+            f"{len(auth_keys)} auth keys from {from_backend}"
+        )
         
         # 写入目标后端
         os.environ["STORAGE_BACKEND"] = to_backend
         to_storage = create_storage_backend(DATA_DIR)
         to_storage.save_accounts(accounts)
-        print(f"[migrate] Saved {len(accounts)} accounts to {to_backend}")
+        to_storage.save_auth_keys(auth_keys)
+        print(
+            f"[migrate] Saved {len(accounts)} accounts and "
+            f"{len(auth_keys)} auth keys to {to_backend}"
+        )
         
         print(f"[migrate] Migration completed successfully!")
         
@@ -102,6 +111,9 @@ def main():
 示例:
   # 从 JSON 迁移到 PostgreSQL
   python scripts/migrate_storage.py --from json --to postgres
+
+  # 从 JSON 迁移到 MySQL
+  python scripts/migrate_storage.py --from json --to mysql
   
   # 从 PostgreSQL 迁移到 Git
   python scripts/migrate_storage.py --from postgres --to git
@@ -113,7 +125,7 @@ def main():
   python scripts/migrate_storage.py --import backup.json
 
 环境变量:
-  STORAGE_BACKEND  - 存储后端类型 (json, sqlite, postgres, git)
+  STORAGE_BACKEND  - 存储后端类型 (json, sqlite, postgres, mysql, git)
   DATABASE_URL     - 数据库连接字符串
   GIT_REPO_URL     - Git 仓库地址
   GIT_TOKEN        - Git 访问令牌
