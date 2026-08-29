@@ -137,6 +137,9 @@ environment:
   - DATABASE_URL=mysql+pymysql://chatgpt2api:password@mysql:3306/chatgpt2api?charset=utf8mb4
 ```
 
+已有 MySQL 实例的快速接入、账号与用户密钥迁移、Docker 网络配置和回滚步骤，见
+[部署文档中的 MySQL 快速接入](./docs/deployment.md#已有-mysql-快速接入)。
+
 ## 功能
 
 ### API 兼容能力

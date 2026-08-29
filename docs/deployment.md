@@ -205,6 +205,125 @@ environment:
 
 建议在已有 MySQL 实例中为本项目创建独立数据库和专用用户，不要直接使用 `newapi` 数据库。
 
+### 已有 MySQL 快速接入
+
+下面流程适用于已经运行 MySQL 容器、希望保留现有账号和用户密钥的部署。只创建独立的 `chatgpt2api` 数据库和用户，
+不会停止 MySQL、OpenResty 或其他业务容器，也不会修改现有业务库。
+
+#### 1. 备份当前 JSON 数据
+
+在项目目录执行，源文件会保留不变，作为回滚依据：
+
+```bash
+set -eu
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+cp -p config.json "config.json.bak-mysql-$stamp"
+cp -p data/accounts.json "data/accounts.json.bak-mysql-$stamp"
+cp -p data/auth_keys.json "data/auth_keys.json.bak-mysql-$stamp"
+```
+
+#### 2. 在已有 MySQL 中创建独立库和专用用户
+
+将下面的 `MYSQL_CONTAINER` 和 `MYSQL_NETWORK` 换成实际名称。密码只在受保护的终端会话中设置，不要提交到 Git：
+
+```bash
+MYSQL_CONTAINER=1Panel-mysql-qkod
+MYSQL_NETWORK=1panel-network
+MYSQL_ROOT_PASSWORD='在受保护终端中输入 MySQL root 密码'
+DB_PASSWORD=$(openssl rand -hex 32)
+
+docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" "$MYSQL_CONTAINER" mysql -uroot <<SQL
+CREATE DATABASE IF NOT EXISTS chatgpt2api CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'chatgpt2api_store'@'%' IDENTIFIED BY '$DB_PASSWORD';
+ALTER USER 'chatgpt2api_store'@'%' IDENTIFIED BY '$DB_PASSWORD';
+GRANT ALL PRIVILEGES ON chatgpt2api.* TO 'chatgpt2api_store'@'%';
+FLUSH PRIVILEGES;
+SQL
+```
+
+这里创建的是共享 MySQL 实例中的独立数据库，不得把 `DATABASE_URL` 指向 `newapi` 或其他业务库。
+
+#### 3. 配置应用和 Docker 网络
+
+在项目 `.env` 中保存连接串。示例中的密码由上一步生成，十六进制密码可以直接放入 URL：
+
+```bash
+CHATGPT2API_DATABASE_URL="mysql+pymysql://chatgpt2api_store:$DB_PASSWORD@$MYSQL_CONTAINER:3306/chatgpt2api?charset=utf8mb4"
+touch .env
+if grep -q '^CHATGPT2API_DATABASE_URL=' .env; then
+  sed -i "s#^CHATGPT2API_DATABASE_URL=.*#CHATGPT2API_DATABASE_URL=$CHATGPT2API_DATABASE_URL#" .env
+else
+  printf 'CHATGPT2API_DATABASE_URL=%s\n' "$CHATGPT2API_DATABASE_URL" >> .env
+fi
+chmod 600 .env
+```
+
+`docker-compose.yml` 的应用服务需要同时加入应用默认网络和 MySQL 所在的外部网络：
+
+```yaml
+services:
+  app:
+    environment:
+      STORAGE_BACKEND: mysql
+      DATABASE_URL: "${CHATGPT2API_DATABASE_URL}"
+    networks:
+      - default
+      - existing-mysql-network
+
+networks:
+  existing-mysql-network:
+    name: 1panel-network
+    external: true
+```
+
+将 `existing-mysql-network` 和 `1panel-network` 替换为实际网络名。先验证配置，不要立即启动：
+
+```bash
+docker compose config --quiet
+```
+
+#### 4. 迁移账号和用户密钥
+
+先停止应用服务，避免迁移时 JSON 快照继续变化；不要执行 `docker compose down`，也不要停止 MySQL：
+
+```bash
+docker compose stop app
+
+docker run --rm --network "$MYSQL_NETWORK" \
+  -v "$PWD/data:/app/data:ro" \
+  -e STORAGE_BACKEND=json \
+  -e DATABASE_URL="$CHATGPT2API_DATABASE_URL" \
+  ghcr.io/qiuqing005/chatgpt2api:1.10.1 \
+  uv run python scripts/migrate_storage.py --from json --to mysql
+```
+
+迁移工具会同时处理 `accounts.json` 和 `auth_keys.json`，并采用增量写入，不会删除源 JSON 文件。
+
+#### 5. 启动并验证
+
+```bash
+docker compose up -d --no-deps app
+docker compose ps
+docker logs --tail 50 chatgpt2api
+curl -fsS http://127.0.0.1:3000/version
+```
+
+日志中应出现 `Initializing storage backend: mysql`，并显示账号监视器加载了现有账号。若应用端口不是 `3000`，按实际映射修改
+`curl` 地址。
+
+#### 6. 快速回滚
+
+回滚只需让应用恢复读取 JSON，数据库保留不动：
+
+```bash
+docker compose stop app
+# 将 STORAGE_BACKEND 改回 json，并移除或注释 DATABASE_URL
+docker compose up -d --no-deps app
+```
+
+如果 JSON 文件被误改，再从 `accounts.json.bak-mysql-时间戳` 和 `auth_keys.json.bak-mysql-时间戳` 恢复。确认 MySQL 数据无误前，
+不要删除 `chatgpt2api` 数据库。
+
 ## 升级前备份
 
 升级前建议备份：
