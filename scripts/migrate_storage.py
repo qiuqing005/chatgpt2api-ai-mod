@@ -135,13 +135,13 @@ def main():
     parser.add_argument(
         "--from",
         dest="from_backend",
-        choices=["json", "sqlite", "postgres", "git"],
+        choices=["json", "sqlite", "postgres", "mysql", "git"],
         help="源存储后端",
     )
     parser.add_argument(
         "--to",
         dest="to_backend",
-        choices=["json", "sqlite", "postgres", "git"],
+        choices=["json", "sqlite", "postgres", "mysql", "git"],
         help="目标存储后端",
     )
     parser.add_argument(
