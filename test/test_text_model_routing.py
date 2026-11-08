@@ -44,6 +44,27 @@ class TextAccountRoutingTests(unittest.TestCase):
 
         self.assertEqual(token, "pro")
 
+    def test_public_alias_is_resolved_before_account_catalog_lookup(self) -> None:
+        for alias, backend_model in (
+            ("gpt-6.1-sol", "gpt-6.1-sol-wm"),
+            ("gpt-6.1-sol-high", "gpt-6.1-sol-wm"),
+            ("gpt-6.1-terra", "gpt-6.1-terra-wm"),
+            ("gpt-6.1-terra-low", "gpt-6.1-terra-wm"),
+        ):
+            with self.subTest(alias=alias):
+                def advertised(model):
+                    return ModelRoute(
+                        account_types=frozenset({"Pro"}) if model == backend_model else frozenset(),
+                        allow_anonymous=False,
+                    )
+
+                with mock.patch(
+                    "services.model_service.model_catalog_service.route_for_model",
+                    side_effect=advertised,
+                ) as catalog:
+                    self.assertEqual(self.service.get_text_access_token(model=alias), "pro")
+                catalog.assert_called_once_with(backend_model)
+
     def test_auto_model_keeps_existing_unfiltered_rotation(self) -> None:
         with mock.patch(
             "services.model_service.model_catalog_service.route_for_model",

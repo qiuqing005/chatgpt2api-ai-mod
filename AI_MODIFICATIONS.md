@@ -163,6 +163,12 @@ This redistribution also includes publication-oriented cleanup:
 - `Dockerfile`
   - Uses the tracked Bun lockfile with `bun install --frozen-lockfile`, matching the frontend dependency graph validated by CI.
 
+## 1.11.1 Account Routing Regression
+
+Live verification exposed an earlier account selection step that queried public aliases before converting them to Web slugs. It could reject `gpt-6.1-sol-high` before the streaming router ran. Account selection now resolves aliases first. Four base/suffix regression cases failed before the fix and passed after it; raw models and `auto` retain their existing behavior.
+
+Focused account, model catalog, alias, and model-list checks: 59 passed, 2 skipped, plus 19 passing subtests.
+
 ## 1.11.0 Validation
 
 - Offline backend suite: 241 passed, 2 skipped, plus 19 passing subtests. The five online API test modules are excluded as in the image publication workflow.

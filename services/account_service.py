@@ -1004,7 +1004,9 @@ class AccountService:
             model: str = "auto",
     ) -> str:
         excluded = set(excluded_tokens or set())
-        requested_model = str(model or "auto").strip() or "auto"
+        from services.protocol.text_model_aliases import resolve_text_backend_route
+
+        requested_model, _ = resolve_text_backend_route(model)
         route = None
         if requested_model != "auto":
             from services.model_service import model_catalog_service
