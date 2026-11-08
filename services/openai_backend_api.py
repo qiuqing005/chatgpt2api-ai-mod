@@ -25,6 +25,7 @@ from services.account_service import account_service
 from services.config import config
 from services.proxy_service import proxy_settings
 from utils.helper import (
+    GPT_IMAGE_MODEL,
     UpstreamHTTPError,
     ensure_ok,
     image_model_thinking_effort,
@@ -220,8 +221,11 @@ def _recv_websocket_message(websocket: Any, timeout_secs: float) -> tuple[bytes,
 def resolve_image_backend_route(model: str) -> tuple[str, str]:
     _, base_model = split_image_model(model)
     thinking_effort = image_model_thinking_effort(model)
-    if base_model == "gpt-image-2":
-        backend_model = config.image_backend_thinking_model if thinking_effort else config.image_backend_model
+    if base_model == GPT_IMAGE_MODEL:
+        routing = config.get_image_model_routing_settings()
+        default_effort = str(routing["thinking_effort"])
+        thinking_effort = thinking_effort or ("" if default_effort == "none" else default_effort)
+        backend_model = str(routing["thinking_model"] if thinking_effort else routing["base_model"])
         return backend_model, thinking_effort
     return base_model or "auto", thinking_effort
 EDITABLE_FILE_TIMEOUT_SECS = 1200.0

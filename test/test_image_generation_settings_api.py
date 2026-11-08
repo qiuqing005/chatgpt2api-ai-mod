@@ -19,8 +19,9 @@ AUTH_HEADERS = {"Authorization": "Bearer admin"}
 class FakeConfig:
     def __init__(self) -> None:
         self.settings = {
-            "base_model": "gpt-5-5",
-            "thinking_model": "gpt-5-5-thinking",
+            "base_model": "gpt-6.1-sol-wm",
+            "thinking_model": "gpt-6.1-sol-wm",
+            "thinking_effort": "extended",
             "fallback_enabled": True,
             "task_workers": 2,
         }
@@ -58,14 +59,14 @@ class ImageGenerationSettingsApiTests(unittest.TestCase):
         response = self.client.get("/api/settings/image-generation", headers=AUTH_HEADERS)
 
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertIn("gpt-5-5", response.json()["model_options"])
-        self.assertIn("gpt-5-5-thinking", response.json()["model_options"])
-        self.assertNotIn("gpt-image-2", response.json()["model_options"])
+        self.assertIn("gpt-6.1-sol-wm", response.json()["model_options"])
+        self.assertNotIn("gpt-image-2.6", response.json()["model_options"])
 
     def test_patch_is_strict_and_updates_only_image_settings(self) -> None:
         payload = {
             "base_model": "gpt-5.6-sol",
             "thinking_model": "gpt-5.6-sol",
+            "thinking_effort": "max",
             "fallback_enabled": False,
             "task_workers": 3,
         }
@@ -91,6 +92,11 @@ class ImageGenerationSettingsApiTests(unittest.TestCase):
         self.assertEqual(invalid.status_code, 422, invalid.text)
         self.assertEqual(partial.status_code, 422, partial.text)
         self.assertEqual(coerced.status_code, 422, coerced.text)
+
+    def test_invalid_thinking_effort_is_rejected(self) -> None:
+        payload = {**self.fake_config.settings, "thinking_effort": "high"}
+        response = self.client.patch("/api/settings/image-generation", headers=AUTH_HEADERS, json=payload)
+        self.assertEqual(response.status_code, 422, response.text)
 
     def test_requires_admin(self) -> None:
         from fastapi import HTTPException

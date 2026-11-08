@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from services.config import config
-from services.openai_backend_api import ChatRequirements, OpenAIBackendAPI
+from services.openai_backend_api import ChatRequirements, OpenAIBackendAPI, resolve_image_backend_route
 from services.protocol import openai_v1_chat_complete, openai_v1_response
 from services.protocol.conversation import (
     ConversationRequest,
@@ -18,6 +18,26 @@ from services.protocol.conversation import (
 
 
 class ImageModelRoutingTests(unittest.TestCase):
+    def test_new_image_model_defaults_to_sol_high_and_suffixes_override(self) -> None:
+        with mock.patch.dict(config.data, {"image_model_routing": {}}):
+            self.assertEqual(resolve_image_backend_route("gpt-image-2.6"), ("gpt-6.1-sol-wm", "extended"))
+            for suffix, effort in (("low", "min"), ("medium", "standard"), ("high", "extended"), ("xhigh", "max")):
+                with self.subTest(suffix=suffix):
+                    self.assertEqual(
+                        resolve_image_backend_route(f"gpt-image-2.6-{suffix}"),
+                        ("gpt-6.1-sol-wm", effort),
+                    )
+
+    def test_image_default_effort_can_be_disabled_without_affecting_suffix(self) -> None:
+        routing = {
+            "base_model": "gpt-6.1-terra-wm",
+            "thinking_model": "gpt-6.1-sol-wm",
+            "thinking_effort": "none",
+        }
+        with mock.patch.dict(config.data, {"image_model_routing": routing}):
+            self.assertEqual(resolve_image_backend_route("gpt-image-2.6"), ("gpt-6.1-terra-wm", ""))
+            self.assertEqual(resolve_image_backend_route("gpt-image-2.6-high"), ("gpt-6.1-sol-wm", "extended"))
+
     def test_backend_model_slugs_come_from_live_config(self) -> None:
         routing = {
             "base_model": "gpt-5.6-sol",
@@ -27,8 +47,8 @@ class ImageModelRoutingTests(unittest.TestCase):
         backend = OpenAIBackendAPI()
         try:
             with mock.patch.dict(config.data, {"image_model_routing": routing}):
-                self.assertEqual(backend._image_model_slug("gpt-image-2"), "gpt-5.6-sol")
-                self.assertEqual(backend._image_model_slug("gpt-image-2-high"), "gpt-5.6-sol")
+                self.assertEqual(backend._image_model_slug("gpt-image-2.6"), "gpt-5.6-sol")
+                self.assertEqual(backend._image_model_slug("gpt-image-2.6-high"), "gpt-5.6-sol")
         finally:
             backend.close()
 
@@ -41,7 +61,7 @@ class ImageModelRoutingTests(unittest.TestCase):
                 _image_model_fallback_chain("team-codex-gpt-image-2"),
                 ["team-codex-gpt-image-2", "codex-gpt-image-2"],
             )
-            self.assertEqual(_image_model_fallback_chain("gpt-image-2-high"), ["gpt-image-2-high"])
+            self.assertEqual(_image_model_fallback_chain("gpt-image-2.6-high"), ["gpt-image-2.6-high"])
             self.assertEqual(
                 _image_model_fallback_chain("team-codex-gpt-image-2", False),
                 ["team-codex-gpt-image-2"],
@@ -95,7 +115,7 @@ class ImageModelRoutingTests(unittest.TestCase):
                 mock.patch.object(backend, "_start_image_generation", side_effect=start),
                 mock.patch("services.openai_backend_api.iter_sse_payloads", return_value=iter(())),
             ):
-                list(backend._stream_picture_conversation("cat", "gpt-image-2-high", []))
+                list(backend._stream_picture_conversation("cat", "gpt-image-2.6-high", []))
         finally:
             backend.close()
 
@@ -104,7 +124,7 @@ class ImageModelRoutingTests(unittest.TestCase):
     def test_high_resolution_sizes_are_codex_only(self) -> None:
         with self.assertRaises(ImageGenerationError) as context:
             list(stream_image_outputs_with_pool(ConversationRequest(
-                model="gpt-image-2",
+                model="gpt-image-2.6",
                 prompt="cat",
                 size="2048x2048",
             )))
@@ -129,7 +149,7 @@ class ImageModelRoutingTests(unittest.TestCase):
 
         with mock.patch.object(openai_v1_chat_complete, "stream_image_outputs_with_pool", side_effect=fake_stream):
             openai_v1_chat_complete.handle({
-                "model": "gpt-image-2",
+                "model": "gpt-image-2.6",
                 "messages": [{"role": "user", "content": "cat"}],
                 "n": 2,
                 "size": "1024x1536",
@@ -144,7 +164,7 @@ class ImageModelRoutingTests(unittest.TestCase):
     def test_chat_image_protocol_rejects_web_high_resolution(self) -> None:
         with self.assertRaises(ImageGenerationError) as context:
             openai_v1_chat_complete.handle({
-                "model": "gpt-image-2",
+                "model": "gpt-image-2.6",
                 "messages": [{"role": "user", "content": "cat"}],
                 "size": "2048x2048",
             })
@@ -167,7 +187,7 @@ class ImageModelRoutingTests(unittest.TestCase):
 
         with mock.patch.object(openai_v1_response, "stream_image_outputs_with_pool", side_effect=fake_stream):
             result = openai_v1_response.handle({
-                "model": "gpt-image-2",
+                "model": "gpt-image-2.6",
                 "input": "cat",
                 "n": 3,
                 "tools": [{"type": "image_generation"}],

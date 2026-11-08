@@ -13,29 +13,30 @@ The changes below were made with AI assistance and should be reviewed before pro
 
 ## AI-Modified Behavior
 
-### GPT-image-2 backend mapping
+### GPT-image-2.6 backend mapping
 
-The default image model remains publicly visible as:
+The public Web image model is:
 
-- `gpt-image-2`
+- `gpt-image-2.6`
 
 Default behavior, configurable from the Web settings page:
 
-- `gpt-image-2` maps to the ChatGPT web backend slug `gpt-5-5`
-- No `thinking_effort` parameter is sent for plain `gpt-image-2`
+- `gpt-image-2.6` maps to the ChatGPT Web backend slug `gpt-6.1-sol-wm`.
+- Plain `gpt-image-2.6` defaults to high, sent as `thinking_effort=extended`.
+- `image_model_routing.thinking_effort` is independent of the global text setting and accepts `none`, `min`, `standard`, `extended`, or `max`; the Web selector labels these as 不思考, low, medium, high, and xhigh. `none` omits the upstream thinking parameter.
 
 Hidden suffixes are accepted for backend routing but are not exposed through `/v1/models`:
 
-- `gpt-image-2-low` -> `thinking_effort=min`
-- `gpt-image-2-medium` -> `thinking_effort=standard`
-- `gpt-image-2-high` -> `thinking_effort=extended`
-- `gpt-image-2-xhigh` -> `thinking_effort=max`
+- `gpt-image-2.6-low` -> `thinking_effort=min`
+- `gpt-image-2.6-medium` -> `thinking_effort=standard`
+- `gpt-image-2.6-high` -> `thinking_effort=extended`
+- `gpt-image-2.6-xhigh` -> `thinking_effort=max`
 
-When one of these hidden suffixes is used, the request is routed to:
+Hidden suffixes override the configured image effort and use the thinking backend, as does the default high setting. That backend defaults to:
 
-- `gpt-5-5-thinking`
+- `gpt-6.1-sol-wm`
 
-The ordinary and thinking backend slugs can be changed independently. For example, both can be set to `gpt-5.6-sol`; the hidden suffix still controls whether `thinking_effort` is added.
+The non-thinking (`base_model`) and thinking (`thinking_model`) backend slugs can be changed independently; both default to `gpt-6.1-sol-wm`. Selecting `none` uses `base_model`; the default high and the hidden effort suffixes use `thinking_model`. `fallback_enabled` and `task_workers` remain configurable. `default_upstream_model_name` also defaults to `gpt-6.1-sol-wm`, while the global `default_thinking_effort` stays `auto` so text defaults do not change.
 
 ### Image quota and task queue
 
@@ -50,7 +51,7 @@ The ordinary and thinking backend slugs can be changed independently. For exampl
 
 ### Image size and fallback rules
 
-- Web-backed `gpt-image-2` requests reject 2K/4K-class dimensions with a structured 400 error.
+- Web-backed `gpt-image-2.6` requests reject 2K/4K-class dimensions with a structured 400 error.
 - Codex image models retain high-resolution support.
 - Content-policy 429 responses do not trigger model fallback.
 - The fallback decision and selected backend model are snapshotted into each queued task so later settings changes cannot alter an in-flight request.
@@ -59,29 +60,29 @@ The upstream Sub2API direct-database billing implementation was intentionally no
 
 The following aliases are intentionally not supported:
 
-- `gpt-image-2-min`
-- `gpt-image-2-standard`
-- `gpt-image-2-extended`
-- `gpt-image-2-max`
+- `gpt-image-2.6-min`
+- `gpt-image-2.6-standard`
+- `gpt-image-2.6-extended`
+- `gpt-image-2.6-max`
 
 ### Public model list
 
 `/v1/models` is intentionally kept clean:
 
-- Public text aliases are limited to stable names such as `gpt-5.3`, `gpt-5.4`, `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-5.6-sol`, `gpt-5-mini`, and `gpt-5-pro`
-- ChatGPT Web slugs such as `gpt-5-6-thinking`, `gpt-5.6-luna-wm`, `gpt-5.6-terra-wm`, `gpt-5.6-sol-wm`, and version-specific mini/pro slugs are not listed
-- `gpt-5.4`, `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` accept hidden `-low`, `-medium`, `-high`, and `-xhigh` suffixes
+- The public catalog contains only `gpt-6.1-sol`, `gpt-6.1-terra`, and `gpt-image-2.6`; all previous public models are removed from that catalog.
+- ChatGPT Web slugs such as `gpt-6.1-sol-wm` and `gpt-6.1-terra-wm` are not listed.
+- `gpt-6.1-sol` and `gpt-6.1-terra` accept hidden `-low`, `-medium`, `-high`, and `-xhigh` suffixes.
 - Text suffixes map to the real Web values `min`, `standard`, `extended`, and `max`; the suffix models are accepted by the backend but not listed
-- `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` remain separate public models and route to their matching `-wm` Web slugs
-- The generic Web slug `gpt-5-6-thinking` and compatibility alias `gpt-5.6` are intentionally not listed
-- Public model list also exposes `gpt-image-2` when backed by a Web account; image suffix models remain hidden
+- The two text aliases route to their matching `-wm` Web slugs.
+- Public model discovery exposes `gpt-image-2.6` when backed by a Web account; image suffix models remain hidden.
+- Codex image transport remains available internally, using the unchanged `codex-gpt-image-2` protocol name; it is not automatically added to the public catalog or renamed to `codex-gpt-image-2.6`.
 - Error messages avoid listing hidden suffix models as public supported models
 
 ### Model account filtering
 
-The model list now only injects `gpt-image-2` when a non-Codex web account with an access token exists.
-Codex-only accounts continue to expose Codex image models through their existing path.
-Authenticated model discovery merges all eligible Web accounts and keeps a compatible token set for each backend model. Explicit text models rotate only among accounts that advertised that model, while `auto` continues to use the normal account pool.
+The model list only injects `gpt-image-2.6` when a non-Codex Web account with an access token exists.
+Codex-only accounts no longer cause internal Codex image models to be automatically published.
+Authenticated model discovery merges all eligible Web accounts and keeps a compatible token set for each backend model. Explicit text models rotate only among accounts that advertised that model.
 
 ### Configurable visible models
 
@@ -108,14 +109,14 @@ This redistribution also includes publication-oriented cleanup:
 ## Modified Files
 
 - `utils/helper.py`
-  - Added hidden GPT-image-2 suffix parsing.
+  - Added hidden Web image suffix parsing, now using the `gpt-image-2.6` public name.
   - Added thinking-effort mapping helpers.
   - Kept public image model constants separate from hidden accepted suffixes.
 
 - `services/openai_backend_api.py`
-  - Updated GPT-image-2 backend slug selection.
-  - Sends `thinking_effort` only when a hidden suffix requests it.
-  - Reads ordinary and thinking image backend slugs from live configuration.
+  - Selects the configured Web image backend, defaulting to `gpt-6.1-sol-wm`.
+  - Sends the configured image effort (default `extended`) unless `none` is selected; a hidden suffix overrides that default.
+  - Reads ordinary and thinking image backend slugs and the default effort from live configuration.
 
 - `services/protocol/text_model_aliases.py`, `services/protocol/openai_v1_models.py`, and `services/protocol/conversation.py`
   - Collapse versioned Web slugs into stable public aliases.
@@ -137,8 +138,10 @@ This redistribution also includes publication-oriented cleanup:
   - Keeps 2K/4K-class dimensions on Codex image transports and rejects them for the Web transport.
 
 - `web/src/app/settings/` and `web/src/app/image/page.tsx`
-  - Add image backend model, task worker, fallback, and user quota controls.
+  - Add image backend model, independent default thinking effort, task worker, fallback, and user quota controls.
   - Show remaining user image quota on the image page.
+  - Use `gpt-image-2.6` for new image defaults, request examples, and missing-model storage fallbacks; preserve stored conversation model values and history.
+  - Reusing a historical prompt selects an available image model when its stored model is no longer in the current list, without rewriting the original turn.
 
 - `services/protocol/openai_v1_models.py`
   - Keeps `/v1/models` from exposing hidden suffix models.
@@ -160,9 +163,17 @@ This redistribution also includes publication-oriented cleanup:
 - `Dockerfile`
   - Uses the tracked Bun lockfile with `bun install --frozen-lockfile`, matching the frontend dependency graph validated by CI.
 
-## Validation Performed
+## 1.11.0 Validation
 
-The current source tree was checked with:
+- Offline backend suite: 241 passed, 2 skipped, plus 19 passing subtests. The five online API test modules are excluded as in the image publication workflow.
+- Frontend TypeScript check passed with `tsc --noEmit --incremental false`; the Next.js production build completed.
+- Real browser checks covered the image settings page at desktop and mobile sizes, including the default high value and all five effort options.
+- Independent read-only release review found no blocking issues and passed 32 isolated route/payload assertions.
+- These checks validate local routing and request construction; live upstream generation is verified separately during deployment.
+
+## Historical Validation
+
+The following results were recorded for an earlier revision using `gpt-image-2`. They are preserved as historical notes and do not validate the current three-model catalog, new defaults, or settings contract. Current integration checks must be reported separately by the integrating task:
 
 - Python syntax compilation for `api`, `services`, `utils`, and `test`.
 - Frozen dev dependency installation with `uv sync --dev --frozen`.

@@ -17,7 +17,7 @@ from services.config import config
 from services.image_storage_service import image_storage_service
 from services.openai_backend_api import ImageContentPolicyError, ImagePollTimeoutError, OpenAIBackendAPI
 from utils.helper import (
-    IMAGE_MODELS,
+    PUBLIC_IMAGE_MODELS,
     extract_image_from_message_content,
     is_codex_image_model,
     is_supported_image_model,
@@ -1589,7 +1589,7 @@ def _generate_single_image(
 
 
 def _image_model_fallback_chain(model: str, fallback_enabled: bool | None = None) -> list[str]:
-    normalized = str(model or "").strip() or "gpt-image-2"
+    normalized = str(model or "").strip() or "gpt-image-2.6"
     enabled = config.image_model_fallback_enabled if fallback_enabled is None else fallback_enabled
     if not enabled or not is_codex_image_model(normalized):
         return [normalized]
@@ -1661,7 +1661,7 @@ def _is_image_model_quota_error(exc: Exception) -> bool:
 def _stream_image_outputs_with_pool_once(request: ConversationRequest) -> Iterator[ImageOutput]:
     """并行生成多张图片，每张图片使用独立线程和账号，互不阻塞。"""
     if not is_supported_image_model(request.model):
-        raise ImageGenerationError("unsupported image model,supported models: " + ", ".join(sorted(IMAGE_MODELS)))
+        raise ImageGenerationError("unsupported image model,supported models: " + ", ".join(sorted(PUBLIC_IMAGE_MODELS)))
 
     if request.n <= 1:
         # 单张图片，直接执行（无需线程池开销）
@@ -1748,7 +1748,7 @@ def stream_image_outputs_with_pool(request: ConversationRequest) -> Iterator[Ima
     _validate_image_size_for_model(request.model, request.size)
     fallback_chain = _image_model_fallback_chain(request.model, request.image_fallback_enabled)
     if not fallback_chain:
-        raise ImageGenerationError("unsupported image model,supported models: " + ", ".join(sorted(IMAGE_MODELS)))
+        raise ImageGenerationError("unsupported image model,supported models: " + ", ".join(sorted(PUBLIC_IMAGE_MODELS)))
 
     last_error: Exception | None = None
     for index, model in enumerate(fallback_chain):

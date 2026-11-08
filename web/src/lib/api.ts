@@ -19,6 +19,7 @@ export type ImageStorageSettings = {
 export type ImageGenerationSettings = {
   base_model: string;
   thinking_model: string;
+  thinking_effort: "none" | "min" | "standard" | "extended" | "max";
   fallback_enabled: boolean;
   task_workers: number;
 };

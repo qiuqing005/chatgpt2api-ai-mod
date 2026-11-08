@@ -10,7 +10,7 @@ from services.config import config
 from services.model_service import model_catalog_service
 from services.openai_backend_api import OpenAIBackendAPI
 from services.protocol.text_model_aliases import public_text_model_items
-from utils.helper import CODEX_IMAGE_MODEL
+from utils.helper import GPT_IMAGE_MODEL
 
 
 _MODEL_ACCOUNT_PRIORITY = {
@@ -261,26 +261,8 @@ def list_models(*, apply_visibility: bool = True) -> dict[str, Any]:
             and account_service._normalize_source_type(account.get("source_type")) != "codex"
         )
     ]
-    codex_types = {
-        normalized
-        for account in accounts
-        if (
-            isinstance(account, dict)
-            and account_service._normalize_source_type(account.get("source_type")) == "codex"
-            and (normalized := account_service._normalize_account_type(account.get("type")))
-        )
-    }
-
     if web_image_accounts:
-        dynamic_models.add("gpt-image-2")
-    if codex_types & {"Plus", "Team", "Pro"}:
-        dynamic_models.add(CODEX_IMAGE_MODEL)
-    if "Plus" in codex_types:
-        dynamic_models.add(f"plus-{CODEX_IMAGE_MODEL}")
-    if "Team" in codex_types:
-        dynamic_models.add(f"team-{CODEX_IMAGE_MODEL}")
-    if "Pro" in codex_types:
-        dynamic_models.add(f"pro-{CODEX_IMAGE_MODEL}")
+        dynamic_models.add(GPT_IMAGE_MODEL)
 
     for model in sorted(dynamic_models):
         if model not in seen:

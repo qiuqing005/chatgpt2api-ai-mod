@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from services.proxy_service import proxy_settings
 from utils.log import logger
 
-GPT_IMAGE_MODEL = "gpt-image-2"
+GPT_IMAGE_MODEL = "gpt-image-2.6"
 BASE_IMAGE_MODELS = {GPT_IMAGE_MODEL, "codex-gpt-image-2"}
 IMAGE_MODEL_PLAN_TYPES = ("plus", "team", "pro")
 CODEX_IMAGE_MODEL = "codex-gpt-image-2"
@@ -33,7 +33,7 @@ PREFIXED_CODEX_IMAGE_MODELS = {
     for plan_type in IMAGE_MODEL_PLAN_TYPES
 }
 IMAGE_MODELS = BASE_IMAGE_MODELS | PREFIXED_CODEX_IMAGE_MODELS
-PUBLIC_IMAGE_MODELS = BASE_IMAGE_MODELS | PREFIXED_CODEX_IMAGE_MODELS
+PUBLIC_IMAGE_MODELS = {GPT_IMAGE_MODEL}
 OUTPUT_DIR = Path(__file__).resolve().parent / "output"
 
 SUPPORTED_JSON_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}

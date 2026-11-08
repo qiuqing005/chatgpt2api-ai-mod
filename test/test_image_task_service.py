@@ -88,7 +88,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                 OWNER,
                 client_task_id="task-1",
                 prompt="cat",
-                model="gpt-image-2",
+                model="gpt-image-2.6",
                 size=None,
                 base_url="http://local.test",
             )
@@ -96,7 +96,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                 OWNER,
                 client_task_id="task-1",
                 prompt="cat",
-                model="gpt-image-2",
+                model="gpt-image-2.6",
                 size=None,
                 base_url="http://local.test",
             )
@@ -114,7 +114,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                 OWNER,
                 client_task_id="private-task",
                 prompt="cat",
-                model="gpt-image-2",
+                model="gpt-image-2.6",
                 size=None,
                 base_url="http://local.test",
             )
@@ -133,7 +133,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                 OWNER,
                 client_task_id="persisted-task",
                 prompt="cat",
-                model="gpt-image-2",
+                model="gpt-image-2.6",
                 size=None,
                 base_url="http://local.test",
             )
@@ -158,7 +158,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                                 "owner_id": "owner-1",
                                 "status": "queued",
                                 "mode": "generate",
-                                "model": "gpt-image-2",
+                                "model": "gpt-image-2.6",
                                 "created_at": "2099-01-01 00:00:00",
                                 "updated_at": "2099-01-01 00:00:00",
                             },
@@ -167,7 +167,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                                 "owner_id": "owner-1",
                                 "status": "running",
                                 "mode": "generate",
-                                "model": "gpt-image-2",
+                                "model": "gpt-image-2.6",
                                 "created_at": "2099-01-01 00:00:00",
                                 "updated_at": "2099-01-01 00:00:00",
                             },
@@ -195,7 +195,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                 OTHER_OWNER,
                 client_task_id="refund-task",
                 prompt="cat",
-                model="gpt-image-2",
+                model="gpt-image-2.6",
                 size=None,
                 base_url="http://local.test",
             )
@@ -215,7 +215,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                     OTHER_OWNER,
                     client_task_id="same-task",
                     prompt="cat",
-                    model="gpt-image-2",
+                    model="gpt-image-2.6",
                     size=None,
                     base_url="http://local.test",
                 )
@@ -251,7 +251,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                     OWNER,
                     client_task_id=f"queued-{index}",
                     prompt="cat",
-                    model="gpt-image-2",
+                    model="gpt-image-2.6",
                     size=None,
                     base_url="http://local.test",
                 )
@@ -279,7 +279,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                     OWNER,
                     client_task_id="snapshot-task",
                     prompt="cat",
-                    model="gpt-image-2-high",
+                    model="gpt-image-2.6-high",
                     size=None,
                     base_url="http://local.test",
                 )
@@ -302,7 +302,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                                 "owner_id": "owner-2",
                                 "status": "queued",
                                 "mode": "generate",
-                                "model": "gpt-image-2",
+                                "model": "gpt-image-2.6",
                                 "quota_reserved": False,
                                 "quota_reservation_tracked": True,
                                 "created_at": "2099-01-01 00:00:00",
@@ -338,7 +338,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                     OWNER,
                     client_task_id="x" * (MAX_CLIENT_TASK_ID_LENGTH + 1),
                     prompt="cat",
-                    model="gpt-image-2",
+                    model="gpt-image-2.6",
                     size=None,
                 )
 
@@ -370,7 +370,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                         OTHER_OWNER,
                         client_task_id="queue-full",
                         prompt="cat",
-                        model="gpt-image-2",
+                        model="gpt-image-2.6",
                         size=None,
                     )
 
@@ -382,7 +382,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                 OTHER_OWNER,
                 client_task_id="queue-full",
                 prompt="cat",
-                model="gpt-image-2",
+                model="gpt-image-2.6",
                 size=None,
             )
             self.assertIn(retried["status"], {"queued", "running", "success"})
@@ -409,7 +409,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                                 "owner_id": "owner-2",
                                 "status": "error",
                                 "mode": "generate",
-                                "model": "gpt-image-2",
+                                "model": "gpt-image-2.6",
                                 "error": "poll timed out",
                                 "conversation_id": "conversation-1",
                                 "quota_reserved": True,
@@ -443,7 +443,7 @@ class ImageTaskServiceTests(unittest.TestCase):
                         "owner_id": "owner-2",
                         "status": "error",
                         "mode": "generate",
-                        "model": "gpt-image-2",
+                        "model": "gpt-image-2.6",
                         "error": "poll timed out",
                         "conversation_id": "conversation-1",
                         "quota_reserved": True,

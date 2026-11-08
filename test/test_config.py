@@ -73,6 +73,7 @@ class ConfigLoadingTests(unittest.TestCase):
             })
 
             self.assertEqual(result["base_model"], "gpt-5.6-sol")
+            self.assertEqual(result["thinking_effort"], "extended")
             self.assertFalse(result["fallback_enabled"])
             self.assertEqual(result["task_workers"], 16)
             store.update({"image_model_routing": {"base_model": "ignored"}, "image_task_workers": 1})
@@ -86,7 +87,7 @@ class ConfigLoadingTests(unittest.TestCase):
                 })
             with self.assertRaises(ValueError):
                 store.update_image_generation_settings({
-                    "base_model": "gpt-image-2",
+                    "base_model": "gpt-image-2.6",
                     "thinking_model": "gpt-5.6-sol",
                     "fallback_enabled": True,
                     "task_workers": 2,
@@ -106,7 +107,7 @@ class ConfigLoadingTests(unittest.TestCase):
             path.write_text(json.dumps({
                 "auth-key": "test-auth",
                 "image_model_routing": {
-                    "base_model": "gpt-image-2",
+                    "base_model": "gpt-image-2.6",
                     "thinking_model": "codex-gpt-5.6-sol",
                     "fallback_enabled": False,
                 },
@@ -114,9 +115,30 @@ class ConfigLoadingTests(unittest.TestCase):
 
             settings = module.ConfigStore(path).get_image_generation_settings()
 
-            self.assertEqual(settings["base_model"], "gpt-5-5")
-            self.assertEqual(settings["thinking_model"], "gpt-5-5-thinking")
+            self.assertEqual(settings["base_model"], "gpt-6.1-sol-wm")
+            self.assertEqual(settings["thinking_model"], "gpt-6.1-sol-wm")
+            self.assertEqual(settings["thinking_effort"], "extended")
             self.assertFalse(settings["fallback_enabled"])
+
+    def test_image_thinking_effort_is_persisted_and_validated(self) -> None:
+        module = self.config_module
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "config.json"
+            path.write_text(json.dumps({"auth-key": "test-auth"}), encoding="utf-8")
+            store = module.ConfigStore(path)
+            payload = {
+                "base_model": "gpt-6.1-sol-wm",
+                "thinking_model": "gpt-6.1-sol-wm",
+                "thinking_effort": "none",
+                "fallback_enabled": False,
+                "task_workers": 2,
+            }
+            store.update_image_generation_settings(payload)
+            self.assertEqual(module.ConfigStore(path).get_image_generation_settings()["thinking_effort"], "none")
+            payload.pop("thinking_effort")
+            self.assertEqual(store.update_image_generation_settings(payload)["thinking_effort"], "none")
+            with self.assertRaises(ValueError):
+                store.update_image_generation_settings({**payload, "thinking_effort": "invalid"})
 
 
 if __name__ == "__main__":

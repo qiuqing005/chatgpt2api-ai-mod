@@ -148,17 +148,16 @@ environment:
 - 兼容 `POST /v1/images/edits` 图片编辑接口
 - 兼容面向图片场景的 `POST /v1/chat/completions`
 - 兼容面向图片场景的 `POST /v1/responses`
-- `GET /v1/models` 只返回稳定别名：`auto`、`gpt-5.3`、`gpt-5.4`、`gpt-5.5`、`gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol`、`gpt-5-mini`、`gpt-5-pro`，以及账号实际支持的独立模型和图片模型
-- `gpt-5.4`、`gpt-5.5` 和三个独立的 GPT-5.6 模型可附加 `-low` / `-medium` / `-high` / `-xhigh`；这些后缀只参与后台思考强度映射，不会出现在 `/v1/models`
-- Web 内部 slug `gpt-5-6-thinking` 与通用别名 `gpt-5.6` 均不会在模型列表中展示
-- AI 修改版中，`gpt-image-2` 仅在存在非 Codex Web 账号时公开暴露；`gpt-image-2-low` / `medium` / `high` / `xhigh` 只作为隐藏后缀参与后台映射，详见 [AI_MODIFICATIONS.md](AI_MODIFICATIONS.md)
+- `GET /v1/models` 的公开目录仅保留三项：文本模型 `gpt-6.1-sol`、`gpt-6.1-terra`，图片模型 `gpt-image-2.6`；实际返回还取决于账号能力和可见模型设置，旧公开模型不再列出
+- 两个文本模型仍接受隐藏的 `-low` / `-medium` / `-high` / `-xhigh` 后缀，依次映射到 Web `min` / `standard` / `extended` / `max`；后缀和内部 `-wm` slug 不在 `/v1/models` 中展示
+- `gpt-image-2.6` 仅在存在非 Codex Web 账号时公开暴露，默认通过 `gpt-6.1-sol-wm` 以 high 档位（Web `extended`）调用图片工具；隐藏后缀 `-low` / `-medium` / `-high` / `-xhigh` 按相同映射覆盖图片默认档位
+- Web「图片生成」设置可独立配置默认思考档位：不思考（`none`，不传思考参数）、low（`min`）、medium（`standard`）、high（`extended`）、xhigh（`max`）；`base_model` 和 `thinking_model` 默认均为 `gpt-6.1-sol-wm`，详见 [AI_MODIFICATIONS.md](AI_MODIFICATIONS.md)
 - 管理员可在 Web 设置的「可见模型」中按需勾选、隐藏、添加或恢复默认模型列表。`visible_models: null` 时保持自动发现；保存自定义列表后只影响 `/v1/models` 的展示，不会删除账号或改变后端路由能力
-- AI 修改的部分仅为web端反代，`gpt-image-2`现在可以在后面添加`-low` / `-medium` / `-high` / `-xhigh` 以使用 `gpt-5-5-思考强度`+`images` 工具，`high` 可以有效提高出图概率，但无法真正的绕过审查，也有可能降低生图模型的准确性
+- `default_upstream_model_name` 默认改为 `gpt-6.1-sol-wm`；全局 `default_thinking_effort` 仍为 `auto`，文本默认思考行为不受图片默认 high 影响
 - 支持通过 `n` 返回多张生成结果 
 - 支持生成可编辑 PPT 文件
 - 支持生成可编辑 PSD 文件
-- 支持 Codex 中的画图接口逆向，仅 `Plus` / `Team` / `Pro` 订阅可用，模型别名为 `codex-gpt-image-2`，如有需要可自行在其他场景映射回
-  `gpt-image-2`，用于和官网画图区分；也就意味着同一账号会同时有官网和 Codex 两份生图额度
+- Codex 画图传输的内部功能暂保留，协议名称仍为 `codex-gpt-image-2`，不会自动加入公开目录，也不改名为 `codex-gpt-image-2.6`；它与 Web 图片传输使用独立额度
 
 ### 在线画图功能
 
@@ -229,7 +228,7 @@ curl http://localhost:8000/v1/models \
 
 | 字段   | 说明                                                                                                         |
 |:-----|:-----------------------------------------------------------------------------------------------------------|
-| 返回模型 | `auto`、可用的 `gpt-5.3` / `gpt-5.4` / `gpt-5.5`、独立的 `gpt-5.6-luna` / `terra` / `sol`、`gpt-5-mini`、`gpt-5-pro` 与图片模型；隐藏思考后缀和 Web 内部 slug 不返回 |
+| 返回模型 | 公开目录仅含 `gpt-6.1-sol`、`gpt-6.1-terra`、`gpt-image-2.6`；按账号能力和可见设置返回，旧模型、隐藏思考后缀、Web 内部 slug 和 Codex 内部模型不自动返回 |
 | 接入场景 | 可接入 Cherry Studio、New API 等上游或客户端                                                                          |
 
 <br>
@@ -247,7 +246,7 @@ curl http://localhost:8000/v1/images/generations \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <auth-key>" \
   -d '{
-    "model": "gpt-image-2",
+    "model": "gpt-image-2.6",
     "prompt": "一只漂浮在太空里的猫",
     "n": 1,
     "response_format": "b64_json"
@@ -260,7 +259,7 @@ curl http://localhost:8000/v1/images/generations \
 
 | 字段                | 说明                                                 |
 |:------------------|:---------------------------------------------------|
-| `model`           | 图片模型，当前可用值以 `/v1/models` 返回结果为准，推荐使用 `gpt-image-2` |
+| `model`           | 图片模型，当前可用值以 `/v1/models` 返回结果为准，推荐使用 `gpt-image-2.6` |
 | `prompt`          | 图片生成提示词                                            |
 | `n`               | 生成数量，当前后端限制为 `1-4`                                 |
 | `response_format` | 当前请求模型中包含该字段，默认值为 `b64_json`                       |
@@ -278,7 +277,7 @@ OpenAI 兼容图片编辑接口，可上传图片文件，也可按官方 JSON �
 ```bash
 curl http://localhost:8000/v1/images/edits \
   -H "Authorization: Bearer <auth-key>" \
-  -F "model=gpt-image-2" \
+  -F "model=gpt-image-2.6" \
   -F "prompt=把这张图改成赛博朋克夜景风格" \
   -F "n=1" \
   -F "image=@./input.png"
@@ -291,7 +290,7 @@ curl http://localhost:8000/v1/images/edits \
   -H "Authorization: Bearer <auth-key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-image-2",
+    "model": "gpt-image-2.6",
     "prompt": "把这张图改成赛博朋克夜景风格",
     "images": [
       {"image_url": "https://example.com/input.png"}
@@ -305,7 +304,7 @@ curl http://localhost:8000/v1/images/edits \
 
 | 字段          | 说明                                            |
 |:------------|:----------------------------------------------|
-| `model`     | 图片模型， `gpt-image-2`                           |
+| `model`     | 图片模型， `gpt-image-2.6`                           |
 | `prompt`    | 图片编辑提示词                                       |
 | `n`         | 生成数量，当前后端限制为 `1-4`                            |
 | `image`     | 需要编辑的图片文件，使用 multipart/form-data 上传           |
@@ -327,7 +326,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <auth-key>" \
   -d '{
-    "model": "gpt-image-2",
+    "model": "gpt-image-2.6",
     "messages": [
       {
         "role": "user",
@@ -366,7 +365,7 @@ curl http://localhost:8000/v1/responses \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <auth-key>" \
   -d '{
-    "model": "gpt-5",
+    "model": "gpt-image-2.6",
     "input": "生成一张未来感城市天际线图片",
     "tools": [
       {

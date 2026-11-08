@@ -316,7 +316,7 @@ class ImageTaskService:
                 "owner_id": owner,
                 "status": TASK_STATUS_QUEUED,
                 "mode": mode,
-                "model": _clean(payload.get("model"), "gpt-image-2"),
+                "model": _clean(payload.get("model"), "gpt-image-2.6"),
                 "size": _clean(payload.get("size")),
                 "quality": _clean(payload.get("quality"), "auto"),
                 "resolved_backend_model": _clean(payload.get("_image_backend_model")),
@@ -358,7 +358,7 @@ class ImageTaskService:
                     mode,
                     payload,
                     dict(identity),
-                    _clean(payload.get("model"), "gpt-image-2"),
+                    _clean(payload.get("model"), "gpt-image-2.6"),
                 )
             except Exception as exc:
                 self._refund_task_quota(key)
@@ -578,7 +578,7 @@ class ImageTaskService:
                 "owner_id": owner,
                 "status": status,
                 "mode": "edit" if item.get("mode") == "edit" else "generate",
-                "model": _clean(item.get("model"), "gpt-image-2"),
+                "model": _clean(item.get("model"), "gpt-image-2.6"),
                 "size": _clean(item.get("size")),
                 "quality": _clean(item.get("quality"), "auto"),
                 "created_at": _clean(item.get("created_at"), _now_iso()),
@@ -727,7 +727,7 @@ class ImageTaskService:
             if not conversation_id:
                 raise ValueError("task has no conversation_id")
             mode = task.get("mode", "generate")
-            model = task.get("model", "gpt-image-2")
+            model = task.get("model", "gpt-image-2.6")
             # 将任务状态重置为 running
             self._update_task(key, status=TASK_STATUS_RUNNING, error="")
 

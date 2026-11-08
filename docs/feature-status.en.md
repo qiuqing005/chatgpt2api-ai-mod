@@ -8,7 +8,8 @@
 | OpenAI 兼容 `POST /v1/images/edits` | ✅  | 已支持，可上传图片进行编辑。 |
 | 面向图片工作流的 `POST /v1/chat/completions` | ✅  | 已支持图片相关请求。 |
 | 面向图片工作流的 `POST /v1/responses` | ✅  | 已支持图片生成工具调用。 |
-| `GET /v1/models` 接口 | ✅  | 返回稳定文本别名与账号支持的图片模型；隐藏 Web 内部 slug 和思考后缀。 |
+| `GET /v1/models` 接口 | ✅  | 公开目录仅含 `gpt-6.1-sol`、`gpt-6.1-terra`、`gpt-image-2.6`，按账号能力与可见设置返回；隐藏 Web 内部 slug 和思考后缀，旧模型与内部 Codex 模型不自动列出。 |
+| Web 图片默认思考档位 | ✅  | `gpt-image-2.6` 默认通过 `gpt-6.1-sol-wm` 使用 high（Web `extended`）；设置中可选不思考、low、medium、high、xhigh。隐藏后缀 `-low` / `-medium` / `-high` / `-xhigh` 分别映射到 `min` / `standard` / `extended` / `max` 并覆盖默认档位。全局文本默认思考仍为 `auto`。 |
 | 同时生成多张图片 | ✅  | 已支持，后端与前端都可进行多图生成。 |
 | 图片并行生成 | ✅  | 多张图片使用独立线程和账号同时生成，可通过 `image_parallel_generation` 配置关闭。 |
 | 图片生成进度追踪 | ✅  | 任务显示当前步骤（上传/预热/获取token/生成中等），支持耗时统计。 |
@@ -17,7 +18,7 @@
 | 前端图片工作台 | ✅  | 已支持图片生成、图片编辑、模型选择、历史记录与查看大图。 |
 | 前端图片懒加载与滚动优化 | ✅  | LazyImage 懒加载、会话切换滚动位置保存与恢复、bfcache 页面恢复同步。 |
 | 前端图片输入 / 参考图交互 | ✅  | 已支持参考图上传、预览、移除和编辑模式工作流。 |
-| Codex 画图接口逆向 | ✅  | 已支持，仅 `Plus` / `Team` / `Pro` 订阅可用，模型别名为 `codex-gpt-image-2`；如有需要可自行在其他场景映射回 `gpt-image-2`。这是 Codex 逆向链路，用于和官网画图区分，同一账号通常会同时支持官网和 Codex 两份生图额度。 |
+| Codex 画图接口逆向 | ✅  | 内部传输功能暂保留，协议名称仍为 `codex-gpt-image-2`，不会自动加入公开目录，也不改成 `codex-gpt-image-2.6`；与官网 Web 图片链路使用独立额度。 |
 | Cherry Studio 接入 | ✅  | 已支持作为绘图接口接入 Cherry Studio。 |
 | New API 接入 | ✅  | 已支持接入 New API。 |
 | 账号池管理 | ✅  | 已支持列表、筛选、批量操作、导出、手动编辑、刷新和删除。 |

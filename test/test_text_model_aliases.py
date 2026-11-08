@@ -19,10 +19,10 @@ from services.protocol.text_model_aliases import (
 class TextModelAliasTests(unittest.TestCase):
     def test_hidden_suffixes_map_to_backend_efforts(self) -> None:
         expected = {
-            "gpt-5.6-low": ("gpt-5-6-thinking", "min"),
-            "gpt-5.6-medium": ("gpt-5-6-thinking", "standard"),
-            "gpt-5.6-high": ("gpt-5-6-thinking", "extended"),
-            "gpt-5.6-xhigh": ("gpt-5-6-thinking", "max"),
+            "gpt-6.1-sol-low": ("gpt-6.1-sol-wm", "min"),
+            "gpt-6.1-sol-medium": ("gpt-6.1-sol-wm", "standard"),
+            "gpt-6.1-sol-high": ("gpt-6.1-sol-wm", "extended"),
+            "gpt-6.1-sol-xhigh": ("gpt-6.1-sol-wm", "max"),
         }
         for model, route in expected.items():
             with self.subTest(model=model):
@@ -30,36 +30,36 @@ class TextModelAliasTests(unittest.TestCase):
 
     def test_suffix_overrides_explicit_effort(self) -> None:
         self.assertEqual(
-            resolve_text_backend_route("gpt-5.5-low", "xhigh"),
-            ("gpt-5-5-thinking", "min"),
+            resolve_text_backend_route("gpt-6.1-sol-low", "xhigh"),
+            ("gpt-6.1-sol-wm", "min"),
         )
 
-    def test_explicit_effort_switches_gpt_55_to_thinking_backend(self) -> None:
-        self.assertEqual(resolve_text_backend_route("gpt-5.5"), ("gpt-5-5", ""))
+    def test_explicit_effort_is_applied_to_sol_backend(self) -> None:
+        self.assertEqual(resolve_text_backend_route("gpt-6.1-sol"), ("gpt-6.1-sol-wm", ""))
         self.assertEqual(
-            resolve_text_backend_route("gpt-5.5", "high"),
-            ("gpt-5-5-thinking", "extended"),
+            resolve_text_backend_route("gpt-6.1-sol", "high"),
+            ("gpt-6.1-sol-wm", "extended"),
         )
 
     def test_raw_models_are_preserved_but_effort_is_normalized(self) -> None:
         self.assertEqual(
-            resolve_text_backend_route("gpt-5-6-thinking", "xhigh"),
-            ("gpt-5-6-thinking", "max"),
+            resolve_text_backend_route("gpt-6.1-sol-wm", "xhigh"),
+            ("gpt-6.1-sol-wm", "max"),
         )
         self.assertEqual(backend_thinking_effort("standard"), "standard")
 
-    def test_independent_gpt_56_variants_route_to_their_own_backend(self) -> None:
+    def test_independent_gpt_61_variants_route_to_their_own_backend(self) -> None:
         self.assertEqual(
-            resolve_text_backend_route("gpt-5.6-luna-high"),
-            ("gpt-5.6-luna-wm", "extended"),
+            resolve_text_backend_route("gpt-6.1-sol-high"),
+            ("gpt-6.1-sol-wm", "extended"),
         )
         self.assertEqual(
-            resolve_text_backend_route("gpt-5.6-terra-xhigh"),
-            ("gpt-5.6-terra-wm", "max"),
+            resolve_text_backend_route("gpt-6.1-terra-xhigh"),
+            ("gpt-6.1-terra-wm", "max"),
         )
         self.assertEqual(
-            resolve_text_backend_route("gpt-5.6-sol-low"),
-            ("gpt-5.6-sol-wm", "min"),
+            resolve_text_backend_route("gpt-6.1-sol-low"),
+            ("gpt-6.1-sol-wm", "min"),
         )
 
     def test_stream_routes_alias_before_selecting_discovery_account(self) -> None:
@@ -90,14 +90,14 @@ class TextModelAliasTests(unittest.TestCase):
             result = list(conversation.stream_text_deltas(
                 SimpleNamespace(access_token="token-round-robin"),
                 ConversationRequest(
-                    model="gpt-5.6-sol-xhigh",
+                    model="gpt-6.1-sol-xhigh",
                     messages=[{"role": "user", "content": "hello"}],
                 ),
             ))
 
         self.assertEqual(result, ["ok"])
         self.assertEqual(created_tokens, ["token-model-account"])
-        self.assertEqual(captured, [("gpt-5.6-sol-wm", "max")])
+        self.assertEqual(captured, [("gpt-6.1-sol-wm", "max")])
 
     def test_regular_text_alias_uses_a_compatible_discovery_account(self) -> None:
         created_tokens: list[str] = []
@@ -126,7 +126,7 @@ class TextModelAliasTests(unittest.TestCase):
             result = list(conversation.stream_text_deltas(
                 SimpleNamespace(access_token="token-round-robin"),
                 ConversationRequest(
-                    model="gpt-5.5-high",
+                    model="gpt-6.1-sol-high",
                     messages=[{"role": "user", "content": "hello"}],
                 ),
             ))
@@ -198,7 +198,7 @@ class TextModelAliasTests(unittest.TestCase):
             result = list(conversation.stream_text_deltas(
                 SimpleNamespace(access_token="token-round-robin"),
                 ConversationRequest(
-                    model="gpt-5.6-terra-high",
+                    model="gpt-6.1-terra-high",
                     messages=[{"role": "user", "content": "hello"}],
                 ),
             ))
@@ -245,7 +245,7 @@ class TextModelAliasTests(unittest.TestCase):
             result = list(conversation.stream_text_deltas(
                 SimpleNamespace(access_token="token-round-robin"),
                 ConversationRequest(
-                    model="gpt-5.6-luna-low",
+                    model="gpt-6.1-sol-low",
                     messages=[{"role": "user", "content": "hello"}],
                 ),
             ))
@@ -258,7 +258,7 @@ class TextModelAliasTests(unittest.TestCase):
         try:
             payload = backend._conversation_payload(
                 [{"role": "user", "content": "hello"}],
-                "gpt-5.6-sol-wm",
+                "gpt-6.1-sol-wm",
                 "Asia/Shanghai",
                 thinking_effort="xhigh",
             )

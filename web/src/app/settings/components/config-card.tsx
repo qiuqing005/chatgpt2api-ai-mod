@@ -154,10 +154,10 @@ export function ConfigCard() {
             <Input
               value={String(config?.default_upstream_model_name || "")}
               onChange={(event) => setDefaultUpstreamModelName(event.target.value)}
-              placeholder="gpt-5-5"
+              placeholder="gpt-6.1-sol-wm"
               className="h-10 rounded-xl border-stone-200 bg-white"
             />
-            <p className="text-xs text-stone-500">gpt-image-2 发起图片请求时使用的上游模型名称，默认 gpt-5-5。</p>
+            <p className="text-xs text-stone-500">默认上游模型名称为 gpt-6.1-sol-wm；图片路由在「图片生成」中单独配置。</p>
           </div>
           <div className="space-y-2">
             <label className="text-sm text-stone-700">默认思考强度</label>
@@ -175,7 +175,7 @@ export function ConfigCard() {
                 <SelectItem value="max">Max</SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-stone-500">模型名称以 -standard、-extended 或 -max 结尾时，模型后缀优先。</p>
+            <p className="text-xs text-stone-500">文本模型的 -low / -medium / -high / -xhigh 隐藏后缀优先；图片使用独立思考档位。</p>
           </div>
           <div className="space-y-2">
             <label className="text-sm text-stone-700">图片自动清理</label>

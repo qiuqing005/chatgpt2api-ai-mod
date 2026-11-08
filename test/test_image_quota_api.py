@@ -42,23 +42,23 @@ class ImageQuotaApiTests(unittest.TestCase):
         generation = self.client.post(
             "/v1/images/generations",
             headers=AUTH_HEADERS,
-            json={"prompt": "cat", "model": "gpt-image-2", "n": 4},
+            json={"prompt": "cat", "model": "gpt-image-2.6", "n": 4},
         )
         chat = self.client.post(
             "/v1/chat/completions",
             headers=AUTH_HEADERS,
-            json={"model": "gpt-image-2-high", "n": 2, "messages": [{"role": "user", "content": "cat"}]},
+            json={"model": "gpt-image-2.6-high", "n": 2, "messages": [{"role": "user", "content": "cat"}]},
         )
         responses = self.client.post(
             "/v1/responses",
             headers=AUTH_HEADERS,
-            json={"model": "gpt-image-2", "n": 3, "input": "cat", "tools": [{"type": "image_generation"}]},
+            json={"model": "gpt-image-2.6", "n": 3, "input": "cat", "tools": [{"type": "image_generation"}]},
         )
         image_url = "data:image/png;base64," + base64.b64encode(b"png").decode("ascii")
         edit = self.client.post(
             "/v1/images/edits",
             headers=AUTH_HEADERS,
-            json={"model": "gpt-image-2", "prompt": "edit", "n": 2, "image": image_url},
+            json={"model": "gpt-image-2.6", "prompt": "edit", "n": 2, "image": image_url},
         )
 
         self.assertEqual(
@@ -87,7 +87,7 @@ class ImageQuotaApiTests(unittest.TestCase):
         response = self.client.post(
             "/v1/images/generations",
             headers=AUTH_HEADERS,
-            json={"prompt": "cat", "model": "gpt-image-2", "n": 1},
+            json={"prompt": "cat", "model": "gpt-image-2.6", "n": 1},
         )
 
         self.assertEqual(response.status_code, 429, response.text)
@@ -97,7 +97,7 @@ class ImageQuotaApiTests(unittest.TestCase):
         response = self.client.post(
             "/v1/images/generations",
             headers=AUTH_HEADERS,
-            json={"prompt": "cat", "model": "gpt-image-2", "n": 3},
+            json={"prompt": "cat", "model": "gpt-image-2.6", "n": 3},
         )
 
         self.assertEqual(response.status_code, 200, response.text)
@@ -113,7 +113,7 @@ class ImageQuotaApiTests(unittest.TestCase):
         response = self.client.post(
             "/v1/images/generations",
             headers=AUTH_HEADERS,
-            json={"prompt": "cat", "model": "gpt-image-2", "n": 2, "stream": True},
+            json={"prompt": "cat", "model": "gpt-image-2.6", "n": 2, "stream": True},
         )
 
         self.assertEqual(response.status_code, 200, response.text)
@@ -136,7 +136,7 @@ class ImageQuotaApiTests(unittest.TestCase):
             response = self.client.post(
                 "/v1/images/generations",
                 headers=AUTH_HEADERS,
-                json={"prompt": "cat", "model": "gpt-image-2", "n": 1, "stream": True},
+                json={"prompt": "cat", "model": "gpt-image-2.6", "n": 1, "stream": True},
             )
 
         self.assertEqual(response.status_code, 200, response.text)
@@ -155,7 +155,7 @@ class ImageQuotaApiTests(unittest.TestCase):
             response = self.client.post(
                 "/v1/images/generations",
                 headers=AUTH_HEADERS,
-                json={"prompt": "cat", "model": "gpt-image-2", "n": 1, "stream": True},
+                json={"prompt": "cat", "model": "gpt-image-2.6", "n": 1, "stream": True},
             )
 
         self.assertEqual(response.status_code, 200, response.text)
@@ -177,7 +177,7 @@ class ImageQuotaApiTests(unittest.TestCase):
         response = self.client.post(
             "/v1/chat/completions",
             headers=AUTH_HEADERS,
-            json={"model": "gpt-image-2-high", "n": 2, "messages": [{"role": "user", "content": "cat"}]},
+            json={"model": "gpt-image-2.6-high", "n": 2, "messages": [{"role": "user", "content": "cat"}]},
         )
 
         self.assertEqual(response.status_code, 200, response.text)
@@ -193,7 +193,7 @@ class ImageQuotaApiTests(unittest.TestCase):
             "/v1/chat/completions",
             headers=AUTH_HEADERS,
             json={
-                "model": "gpt-image-2-high",
+                "model": "gpt-image-2.6-high",
                 "n": 2,
                 "stream": True,
                 "messages": [{"role": "user", "content": "cat"}],
@@ -214,7 +214,7 @@ class ImageQuotaApiTests(unittest.TestCase):
         response = self.client.post(
             "/v1/responses",
             headers=AUTH_HEADERS,
-            json={"model": "gpt-image-2", "n": 2, "input": "cat", "tools": [{"type": "image_generation"}]},
+            json={"model": "gpt-image-2.6", "n": 2, "input": "cat", "tools": [{"type": "image_generation"}]},
         )
 
         self.assertEqual(response.status_code, 200, response.text)

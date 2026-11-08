@@ -165,7 +165,7 @@ function normalizeStoredImageModel(value: string | null, availableModels: ImageM
   if (normalized && availableModels.includes(normalized)) {
     return normalized;
   }
-  return availableModels[0] || "gpt-image-2";
+  return availableModels[0] || "gpt-image-2.6";
 }
 
 function buildReferenceImageFromResult(image: StoredImage, fileName: string): StoredReferenceImage | null {
@@ -479,8 +479,8 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
   const [imageWidth, setImageWidth] = useState("1024");
   const [imageHeight, setImageHeight] = useState("1024");
   const [imageQuality, setImageQuality] = useState("auto");
-  const [imageModel, setImageModel] = useState<ImageModel>("gpt-image-2");
-  const [imageModels, setImageModels] = useState<ImageModel[]>(["gpt-image-2"]);
+  const [imageModel, setImageModel] = useState<ImageModel>("gpt-image-2.6");
+  const [imageModels, setImageModels] = useState<ImageModel[]>(["gpt-image-2.6"]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [referenceImageFiles, setReferenceImageFiles] = useState<File[]>([]);
   const [referenceImages, setReferenceImages] = useState<StoredReferenceImage[]>([]);
@@ -715,7 +715,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
         });
       } catch {
         if (!cancelled) {
-          setImageModels(["gpt-image-2"]);
+          setImageModels(["gpt-image-2.6"]);
         }
       }
     };
@@ -1159,7 +1159,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
     setImageWidth(parsedSize.width);
     setImageHeight(parsedSize.height);
     setImageQuality(turn.quality);
-    setImageModel(turn.model);
+    setImageModel(normalizeStoredImageModel(turn.model, imageModels));
     setReferenceImages(turn.referenceImages);
     setReferenceImageFiles(
       turn.referenceImages.map((image) => dataUrlToFile(image.dataUrl, image.name, image.type)),
@@ -1169,7 +1169,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
     }
     textareaRef.current?.focus();
     toast.success("已复用这条提示词配置");
-  }, []);
+  }, [imageModels]);
 
   const openLightbox = useCallback((images: ImageLightboxItem[], index: number) => {
     if (images.length === 0) {

@@ -51,11 +51,13 @@ DEFAULT_CHAT_COMPLETION_CACHE = {
 }
 
 DEFAULT_IMAGE_MODEL_ROUTING = {
-    "base_model": "gpt-5-5",
-    "thinking_model": "gpt-5-5-thinking",
+    "base_model": "gpt-6.1-sol-wm",
+    "thinking_model": "gpt-6.1-sol-wm",
+    "thinking_effort": "extended",
     "fallback_enabled": True,
 }
 
+IMAGE_THINKING_EFFORTS = {"none", "min", "standard", "extended", "max"}
 IMAGE_BACKEND_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 VISIBLE_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
@@ -237,9 +239,15 @@ def _normalize_image_model_routing_settings(value: object) -> dict[str, object]:
         base_model = str(DEFAULT_IMAGE_MODEL_ROUTING["base_model"])
     if not _is_valid_image_backend_model(thinking_model):
         thinking_model = str(DEFAULT_IMAGE_MODEL_ROUTING["thinking_model"])
+    thinking_effort = str(
+        source.get("thinking_effort") or DEFAULT_IMAGE_MODEL_ROUTING["thinking_effort"]
+    ).strip().lower()
+    if thinking_effort not in IMAGE_THINKING_EFFORTS:
+        thinking_effort = str(DEFAULT_IMAGE_MODEL_ROUTING["thinking_effort"])
     return {
         "base_model": base_model,
         "thinking_model": thinking_model,
+        "thinking_effort": thinking_effort,
         "fallback_enabled": _normalize_bool(
             source.get("fallback_enabled"),
             bool(DEFAULT_IMAGE_MODEL_ROUTING["fallback_enabled"]),
@@ -268,6 +276,8 @@ def _validate_image_model_routing_settings(value: object) -> None:
             raise ValueError(f"{label}格式无效，仅支持模型 slug 常用字符")
         if not _is_valid_image_backend_model(model):
             raise ValueError(f"{label}必须是 Web 底层 GPT 模型，不能填写图片或 Codex 模型别名")
+    if value.get("thinking_effort", DEFAULT_IMAGE_MODEL_ROUTING["thinking_effort"]) not in IMAGE_THINKING_EFFORTS:
+        raise ValueError("图片默认思考强度必须是 none、min、standard、extended 或 max")
 
 
 def _normalize_status_codes(value: object) -> list[int]:
@@ -590,7 +600,7 @@ class ConfigStore:
 
     @property
     def default_upstream_model_name(self) -> str:
-        return str(self.data.get("default_upstream_model_name") or "gpt-5-5").strip()
+        return str(self.data.get("default_upstream_model_name") or "gpt-6.1-sol-wm").strip()
 
     @property
     def default_thinking_effort(self) -> str:
@@ -744,6 +754,7 @@ class ConfigStore:
         return {
             "base_model": routing["base_model"],
             "thinking_model": routing["thinking_model"],
+            "thinking_effort": routing["thinking_effort"],
             "fallback_enabled": routing["fallback_enabled"],
             "task_workers": self.image_task_workers,
         }
@@ -752,6 +763,9 @@ class ConfigStore:
         routing = {
             "base_model": value.get("base_model"),
             "thinking_model": value.get("thinking_model"),
+            "thinking_effort": value.get(
+                "thinking_effort", self.get_image_model_routing_settings()["thinking_effort"]
+            ),
             "fallback_enabled": value.get("fallback_enabled"),
         }
         _validate_image_model_routing_settings(routing)

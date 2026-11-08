@@ -19,6 +19,8 @@ def test_visible_models_allowlist_filters_defaults_and_adds_custom_model():
                     {"id": "auto"},
                     {"id": "gpt-5-5"},
                     {"id": "gpt-5-5-thinking"},
+                    {"id": "gpt-6.1-sol-wm"},
+                    {"id": "gpt-6.1-terra-wm"},
                     {"id": "gpt-5-6-thinking"},
                 ],
             },
@@ -51,7 +53,7 @@ def test_visible_models_null_keeps_default_public_filtering():
         ), mock.patch.object(openai_v1_models.account_service, "list_accounts", return_value=[]):
             result = openai_v1_models.list_models()
 
-        assert [item["id"] for item in result["data"]] == ["auto", "gpt-5.5"]
+        assert [item["id"] for item in result["data"]] == []
     finally:
         if original is None:
             config.data.pop("visible_models", None)

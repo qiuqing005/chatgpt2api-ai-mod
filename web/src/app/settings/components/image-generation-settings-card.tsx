@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   fetchImageGenerationSettings,
   updateImageGenerationSettings,
@@ -25,7 +26,7 @@ export function ImageGenerationSettingsCard() {
     setLoadError("");
     try {
       const data = await fetchImageGenerationSettings();
-      setSettings(data.settings);
+      setSettings({ ...data.settings, thinking_effort: data.settings.thinking_effort ?? "extended" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "加载图片生成设置失败";
       setSettings(null);
@@ -100,22 +101,40 @@ export function ImageGenerationSettingsCard() {
 
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">GPT-image-2 底层模型</label>
+            <label className="text-sm font-medium text-stone-700">GPT-image-2.6 底层模型</label>
             <Input
               value={settings.base_model}
               onChange={(event) => setSettings((current) => current ? ({ ...current, base_model: event.target.value }) : current)}
-              placeholder="gpt-5-5"
+              placeholder="gpt-6.1-sol-wm"
               className="h-10 rounded-xl border-stone-200 bg-white font-mono shadow-none"
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700">思考后缀底层模型</label>
+            <label className="text-sm font-medium text-stone-700">思考底层模型</label>
             <Input
               value={settings.thinking_model}
               onChange={(event) => setSettings((current) => current ? ({ ...current, thinking_model: event.target.value }) : current)}
-              placeholder="gpt-5-5-thinking"
+              placeholder="gpt-6.1-sol-wm"
               className="h-10 rounded-xl border-stone-200 bg-white font-mono shadow-none"
             />
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="image-thinking-effort" className="text-sm font-medium text-stone-700">默认思考档位</label>
+            <Select
+              value={settings.thinking_effort}
+              onValueChange={(value) => setSettings((current) => current ? ({ ...current, thinking_effort: value as ImageGenerationSettings["thinking_effort"] }) : current)}
+            >
+              <SelectTrigger id="image-thinking-effort" className="h-10 rounded-xl border-stone-200 bg-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">不思考</SelectItem>
+                <SelectItem value="min">low</SelectItem>
+                <SelectItem value="standard">medium</SelectItem>
+                <SelectItem value="extended">high</SelectItem>
+                <SelectItem value="max">xhigh</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium text-stone-700">后台任务并发</label>

@@ -89,39 +89,44 @@ class AccountCapabilityTests(unittest.TestCase):
             self.assertEqual(updated["status"], "限流")
 
     def test_split_image_model_supports_plan_type_prefix(self) -> None:
-        self.assertEqual(split_image_model("gpt-image-2"), (None, "gpt-image-2"))
+        self.assertEqual(split_image_model("gpt-image-2.6"), (None, "gpt-image-2.6"))
         self.assertEqual(split_image_model("plus-codex-gpt-image-2"), ("plus", "codex-gpt-image-2"))
         self.assertEqual(split_image_model("team-codex-gpt-image-2"), ("team", "codex-gpt-image-2"))
         self.assertEqual(split_image_model("pro-codex-gpt-image-2"), ("pro", "codex-gpt-image-2"))
-        self.assertEqual(split_image_model("plus-gpt-image-2"), (None, None))
+        self.assertEqual(split_image_model("plus-gpt-image-2.6"), (None, None))
         self.assertEqual(split_image_model("unknown-image-model"), (None, None))
 
     def test_gpt_image_thinking_suffixes_are_hidden_supported_aliases(self) -> None:
         expected_efforts = {
-            "gpt-image-2-low": "min",
-            "gpt-image-2-medium": "standard",
-            "gpt-image-2-high": "extended",
-            "gpt-image-2-xhigh": "max",
+            "gpt-image-2.6-low": "min",
+            "gpt-image-2.6-medium": "standard",
+            "gpt-image-2.6-high": "extended",
+            "gpt-image-2.6-xhigh": "max",
         }
         for model, effort in expected_efforts.items():
             with self.subTest(model=model):
-                self.assertEqual(split_image_model(model), (None, "gpt-image-2"))
+                self.assertEqual(split_image_model(model), (None, "gpt-image-2.6"))
                 self.assertEqual(image_model_thinking_effort(model), effort)
                 self.assertTrue(image_model_uses_thinking(model))
 
-        self.assertEqual(image_model_thinking_effort("gpt-image-2"), "")
-        self.assertFalse(image_model_uses_thinking("gpt-image-2"))
+        self.assertEqual(image_model_thinking_effort("gpt-image-2.6"), "")
+        self.assertFalse(image_model_uses_thinking("gpt-image-2.6"))
 
     def test_gpt_image_raw_thinking_effort_aliases_are_not_supported(self) -> None:
         for model in (
-            "gpt-image-2-min",
-            "gpt-image-2-standard",
-            "gpt-image-2-extended",
-            "gpt-image-2-max",
+            "gpt-image-2.6-min",
+            "gpt-image-2.6-standard",
+            "gpt-image-2.6-extended",
+            "gpt-image-2.6-max",
         ):
             with self.subTest(model=model):
                 self.assertEqual(split_image_model(model), (None, None))
                 self.assertEqual(image_model_thinking_effort(model), "")
+
+    def test_retired_web_image_model_is_not_an_alias_for_the_new_model(self) -> None:
+        for model in ("gpt-image-2", "gpt-image-2-high", "gpt-image-2-xhigh"):
+            with self.subTest(model=model):
+                self.assertEqual(split_image_model(model), (None, None))
 
     def test_get_available_access_token_filters_by_plan_type(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

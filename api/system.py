@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from urllib.parse import quote
+from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
@@ -36,6 +37,7 @@ class ImageGenerationSettingsUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     base_model: str = Field(..., strict=True, min_length=1, max_length=128)
     thinking_model: str = Field(..., strict=True, min_length=1, max_length=128)
+    thinking_effort: Literal["none", "min", "standard", "extended", "max"] = "extended"
     fallback_enabled: bool = Field(..., strict=True)
     task_workers: int = Field(..., strict=True, ge=1, le=16)
 
@@ -147,7 +149,7 @@ def create_router(app_version: str) -> APIRouter:
     ):
         require_admin(authorization)
         try:
-            settings = config.update_image_generation_settings(body.model_dump(mode="python"))
+            settings = config.update_image_generation_settings(body.model_dump(mode="python", exclude_unset=True))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         return {"settings": settings}

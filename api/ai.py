@@ -35,7 +35,7 @@ from utils.log import logger
 
 class ImageGenerationRequest(BaseModel):
     prompt: str = Field(..., min_length=1)
-    model: str = "gpt-image-2"
+    model: str = "gpt-image-2.6"
     n: int = Field(default=1, ge=1, le=4)
     size: str | None = None
     quality: str = "auto"
@@ -133,7 +133,7 @@ def create_router() -> APIRouter:
             raise last_error or ImageQuotaStorageError("图片额度结算失败")
 
         try:
-            backend_model, thinking_effort = resolve_image_backend_route(str(payload.get("model") or "gpt-image-2"))
+            backend_model, thinking_effort = resolve_image_backend_route(str(payload.get("model") or "gpt-image-2.6"))
             payload["_image_backend_model"] = backend_model
             payload["_image_thinking_effort"] = thinking_effort
             payload["_image_fallback_enabled"] = config.image_model_fallback_enabled

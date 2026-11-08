@@ -19,28 +19,14 @@ class TextModelAlias:
 
 
 TEXT_MODEL_ALIASES = {
-    "gpt-5.3": TextModelAlias("gpt-5-3"),
-    "gpt-5.4": TextModelAlias("gpt-5-4-thinking", "gpt-5-4-thinking"),
-    "gpt-5.5": TextModelAlias("gpt-5-5", "gpt-5-5-thinking"),
-    "gpt-5.6": TextModelAlias("gpt-5-6-thinking", "gpt-5-6-thinking"),
-    "gpt-5.6-luna": TextModelAlias("gpt-5.6-luna-wm", "gpt-5.6-luna-wm"),
-    "gpt-5.6-terra": TextModelAlias("gpt-5.6-terra-wm", "gpt-5.6-terra-wm"),
-    "gpt-5.6-sol": TextModelAlias("gpt-5.6-sol-wm", "gpt-5.6-sol-wm"),
-    "gpt-5-mini": TextModelAlias("gpt-5-5-mini"),
-    "gpt-5-pro": TextModelAlias("gpt-5-6-pro"),
+    "gpt-6.1-sol": TextModelAlias("gpt-6.1-sol-wm", "gpt-6.1-sol-wm"),
+    "gpt-6.1-terra": TextModelAlias("gpt-6.1-terra-wm", "gpt-6.1-terra-wm"),
 }
 
 _PUBLIC_MODEL_SOURCES = {
-    "gpt-5.3": ("gpt-5-3",),
-    "gpt-5.4": ("gpt-5-4-thinking",),
-    "gpt-5.5": ("gpt-5-5", "gpt-5-5-thinking"),
-    "gpt-5.6-luna": ("gpt-5.6-luna-wm",),
-    "gpt-5.6-terra": ("gpt-5.6-terra-wm",),
-    "gpt-5.6-sol": ("gpt-5.6-sol-wm",),
-    "gpt-5-mini": ("gpt-5-5-mini",),
-    "gpt-5-pro": ("gpt-5-6-pro",),
+    alias: (route.backend_model,)
+    for alias, route in TEXT_MODEL_ALIASES.items()
 }
-_PASSTHROUGH_PUBLIC_MODELS = ("o3", "o3-pro", "research")
 
 
 def normalize_text_thinking_effort(value: object) -> str:
@@ -105,16 +91,11 @@ def public_text_model_items(upstream_data: Iterable[object]) -> list[dict[str, A
         for item in upstream_data
         if isinstance(item, dict) and str(item.get("id") or "").strip()
     }
-    public = [_model_item("auto", upstream.get("auto"))]
+    public = []
 
     for alias, source_ids in _PUBLIC_MODEL_SOURCES.items():
         if not all(source_id in upstream for source_id in source_ids):
             continue
         public.append(_model_item(alias, upstream[source_ids[0]]))
-
-    for model_id in _PASSTHROUGH_PUBLIC_MODELS:
-        source = upstream.get(model_id)
-        if source is not None:
-            public.append(_model_item(model_id, source))
 
     return public

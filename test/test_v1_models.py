@@ -44,7 +44,7 @@ class ModelListTests(unittest.TestCase):
                 created_tokens.append(access_token)
 
             def list_models(self) -> dict:
-                models = ["gpt-5.6-sol-wm"] if created_tokens[-1] else ["auto"]
+                models = ["gpt-6.1-sol-wm"] if created_tokens[-1] else ["auto"]
                 return {
                     "object": "list",
                     "data": [{"id": model} for model in models],
@@ -77,9 +77,9 @@ class ModelListTests(unittest.TestCase):
 
         self.assertEqual(created_tokens, ["token-web-pro"])
         ids = {item["id"] for item in result["data"]}
-        self.assertIn("gpt-5.6-sol", ids)
+        self.assertIn("gpt-6.1-sol", ids)
         self.assertNotIn("gpt-5.6", ids)
-        self.assertNotIn("gpt-5.6-sol-wm", ids)
+        self.assertNotIn("gpt-6.1-sol-wm", ids)
 
     def test_list_models_falls_back_to_anonymous_when_web_account_fails(self):
         created_tokens: list[str] = []
@@ -121,8 +121,8 @@ class ModelListTests(unittest.TestCase):
             second = openai_v1_models.list_models()
 
         self.assertEqual(created_tokens, ["token-web-pro", ""])
-        self.assertEqual([item["id"] for item in result["data"]], ["auto", "gpt-image-2"])
-        self.assertEqual([item["id"] for item in second["data"]], ["auto", "gpt-image-2"])
+        self.assertEqual([item["id"] for item in result["data"]], ["gpt-image-2.6"])
+        self.assertEqual([item["id"] for item in second["data"]], ["gpt-image-2.6"])
 
     def test_list_models_falls_back_when_token_refresh_fails(self):
         created_tokens: list[str] = []
@@ -160,7 +160,7 @@ class ModelListTests(unittest.TestCase):
             result = openai_v1_models.list_models()
 
         self.assertEqual(created_tokens, [""])
-        self.assertEqual([item["id"] for item in result["data"]], ["auto", "gpt-image-2"])
+        self.assertEqual([item["id"] for item in result["data"]], ["gpt-image-2.6"])
 
     def test_list_models_reuses_authenticated_cache(self):
         created_tokens: list[str] = []
@@ -170,7 +170,7 @@ class ModelListTests(unittest.TestCase):
                 created_tokens.append(access_token)
 
             def list_models(self) -> dict:
-                return {"object": "list", "data": [{"id": "gpt-5.6-sol-wm"}]}
+                return {"object": "list", "data": [{"id": "gpt-6.1-sol-wm"}]}
 
             def close(self) -> None:
                 return None
@@ -199,10 +199,10 @@ class ModelListTests(unittest.TestCase):
             first = openai_v1_models.list_models()
             first["data"].clear()
             second = openai_v1_models.list_models()
-            preferred = openai_v1_models.preferred_access_token_for_model("gpt-5.6-sol-wm")
+            preferred = openai_v1_models.preferred_access_token_for_model("gpt-6.1-sol-wm")
 
         self.assertEqual(created_tokens, ["token-web-pro"])
-        self.assertIn("gpt-5.6-sol", {item["id"] for item in second["data"]})
+        self.assertIn("gpt-6.1-sol", {item["id"] for item in second["data"]})
         self.assertEqual(preferred, "token-web-pro")
 
     def test_model_discovery_merges_accounts_and_keeps_per_model_tokens(self):
@@ -215,8 +215,8 @@ class ModelListTests(unittest.TestCase):
 
             def list_models(self) -> dict:
                 models = {
-                    "token-luna": ["gpt-5.6-luna-wm", "gpt-5-5"],
-                    "token-terra-sol": ["gpt-5.6-terra-wm", "gpt-5.6-sol-wm", "gpt-5-5"],
+                    "token-luna": ["gpt-6.1-sol-wm", "gpt-5-5"],
+                    "token-terra-sol": ["gpt-6.1-terra-wm", "gpt-6.1-sol-wm", "gpt-5-5"],
                     "token-unused": ["gpt-5-4-thinking"],
                 }[self.access_token]
                 return {"object": "list", "data": [{"id": model} for model in models]}
@@ -249,14 +249,14 @@ class ModelListTests(unittest.TestCase):
                 side_effect=lambda token: next(account for account in accounts if account["access_token"] == token),
             ),
         ):
-            luna_token = openai_v1_models.preferred_access_token_for_model("gpt-5.6-luna-wm")
+            luna_token = openai_v1_models.preferred_access_token_for_model("gpt-6.1-sol-wm")
             result = openai_v1_models.list_models()
-            terra_token = openai_v1_models.preferred_access_token_for_model("gpt-5.6-terra-wm")
-            sol_token = openai_v1_models.preferred_access_token_for_model("gpt-5.6-sol-wm")
+            terra_token = openai_v1_models.preferred_access_token_for_model("gpt-6.1-terra-wm")
+            sol_token = openai_v1_models.preferred_access_token_for_model("gpt-6.1-sol-wm")
 
         ids = {item["id"] for item in result["data"]}
         self.assertEqual(created_tokens, ["token-luna", "token-terra-sol", "token-unused"])
-        self.assertTrue({"gpt-5.4", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"} <= ids)
+        self.assertEqual(ids, {"gpt-6.1-sol", "gpt-6.1-terra", "gpt-image-2.6"})
         self.assertEqual(luna_token, "token-luna")
         self.assertEqual(terra_token, "token-terra-sol")
         self.assertEqual(sol_token, "token-terra-sol")
@@ -316,7 +316,7 @@ class ModelListTests(unittest.TestCase):
             def list_models(self) -> dict:
                 if phase["value"] == "partial" and self.access_token == "token-luna":
                     raise RuntimeError("temporary discovery failure")
-                model = "gpt-5.6-luna-wm" if self.access_token == "token-luna" else "gpt-5.6-terra-wm"
+                model = "gpt-6.1-sol-wm" if self.access_token == "token-luna" else "gpt-6.1-terra-wm"
                 return {"object": "list", "data": [{"id": model}]}
 
             def close(self) -> None:
@@ -355,9 +355,9 @@ class ModelListTests(unittest.TestCase):
                 )
             phase["value"] = "partial"
             second = openai_v1_models.list_models()
-            luna_token = openai_v1_models.preferred_access_token_for_model("gpt-5.6-luna-wm")
+            luna_token = openai_v1_models.preferred_access_token_for_model("gpt-6.1-sol-wm")
 
-        expected = {"gpt-5.6-luna", "gpt-5.6-terra"}
+        expected = {"gpt-6.1-sol", "gpt-6.1-terra"}
         self.assertTrue(expected <= {item["id"] for item in first["data"]})
         self.assertTrue(expected <= {item["id"] for item in second["data"]})
         self.assertEqual(luna_token, "token-luna")
@@ -367,9 +367,9 @@ class ModelListTests(unittest.TestCase):
         with openai_v1_models._models_cache_lock:
             openai_v1_models._models_cache["auth"] = (
                 openai_v1_models.time.monotonic() - openai_v1_models._MODELS_CACHE_TTL_SECS - 1,
-                {"object": "list", "data": [{"id": "gpt-5.6-sol-wm"}]},
+                {"object": "list", "data": [{"id": "gpt-6.1-sol-wm"}]},
             )
-            openai_v1_models._models_auth_tokens["gpt-5.6-sol-wm"] = ["token-sol"]
+            openai_v1_models._models_auth_tokens["gpt-6.1-sol-wm"] = ["token-sol"]
 
         with (
             mock.patch.object(openai_v1_models.account_service, "list_accounts", return_value=[account]),
@@ -377,7 +377,7 @@ class ModelListTests(unittest.TestCase):
             mock.patch.object(openai_v1_models.account_service, "get_account", return_value=account),
             mock.patch.object(openai_v1_models, "_refresh_models_in_background") as refresh,
         ):
-            token = openai_v1_models.preferred_access_token_for_model("gpt-5.6-sol-wm")
+            token = openai_v1_models.preferred_access_token_for_model("gpt-6.1-sol-wm")
 
         self.assertEqual(token, "token-sol")
         refresh.assert_called_once()
@@ -392,12 +392,16 @@ class ModelListTests(unittest.TestCase):
             "gpt-5-5-thinking",
             "gpt-5.5-wm",
             "gpt-5.5-cca-wm",
-            "gpt-5.6-luna-wm",
-            "gpt-5.6-terra-wm",
-            "gpt-5.6-sol-wm",
+            "gpt-6.1-sol-wm",
+            "gpt-6.1-terra-wm",
             "gpt-5-6-thinking",
             "gpt-5-5-mini",
             "gpt-5-6-pro",
+            "gpt-5.6-sol-wm",
+            "gpt-6-sol-wm",
+            "gpt-6",
+            "auto",
+            "chatgpt_alpha_model_external_access_reserved_gate_13",
             "o3",
             "o3-pro",
             "research",
@@ -426,19 +430,9 @@ class ModelListTests(unittest.TestCase):
         self.assertEqual(
             ids,
             [
-                "auto",
-                "gpt-5.3",
-                "gpt-5.4",
-                "gpt-5.5",
-                "gpt-5.6-luna",
-                "gpt-5.6-terra",
-                "gpt-5.6-sol",
-                "gpt-5-mini",
-                "gpt-5-pro",
-                "o3",
-                "o3-pro",
-                "research",
-                "gpt-image-2",
+                "gpt-6.1-sol",
+                "gpt-6.1-terra",
+                "gpt-image-2.6",
             ],
         )
         self.assertFalse(any(model.endswith(("-low", "-medium", "-high", "-xhigh")) for model in ids))
@@ -467,11 +461,11 @@ class ModelListTests(unittest.TestCase):
 
         self.assertNotIn("gpt-5.5", {item["id"] for item in result["data"]})
 
-    def test_list_models_only_returns_image_models_backed_by_account_types(self):
+    def test_list_models_keeps_codex_models_out_of_default_public_catalog(self):
         with (
             mock.patch.object(
-                openai_v1_models.model_catalog_service,
-                "list_models",
+                openai_v1_models,
+                "_load_upstream_models",
                 return_value={"object": "list", "data": []},
             ),
             mock.patch.object(
@@ -487,17 +481,18 @@ class ModelListTests(unittest.TestCase):
             result = openai_v1_models.list_models()
 
         ids = {item["id"] for item in result["data"]}
-        self.assertIn("gpt-image-2", ids)
-        self.assertIn("codex-gpt-image-2", ids)
-        self.assertIn("team-codex-gpt-image-2", ids)
+        self.assertIn("gpt-image-2.6", ids)
+        self.assertEqual(ids, {"gpt-image-2.6"})
+        self.assertNotIn("codex-gpt-image-2", ids)
+        self.assertNotIn("team-codex-gpt-image-2", ids)
         self.assertNotIn("plus-codex-gpt-image-2", ids)
         self.assertNotIn("pro-codex-gpt-image-2", ids)
 
     def test_list_models_does_not_return_codex_models_for_web_plus_accounts(self):
         with (
             mock.patch.object(
-                openai_v1_models.model_catalog_service,
-                "list_models",
+                openai_v1_models,
+                "_load_upstream_models",
                 return_value={"object": "list", "data": []},
             ),
             mock.patch.object(
@@ -511,22 +506,19 @@ class ModelListTests(unittest.TestCase):
             result = openai_v1_models.list_models()
 
         ids = {item["id"] for item in result["data"]}
-        self.assertIn("gpt-image-2", ids)
+        self.assertIn("gpt-image-2.6", ids)
         self.assertNotIn("codex-gpt-image-2", ids)
         self.assertNotIn("plus-codex-gpt-image-2", ids)
-        self.assertNotIn("gpt-image-2-low", ids)
-        self.assertNotIn("gpt-image-2-medium", ids)
-        self.assertNotIn("gpt-image-2-high", ids)
-        self.assertNotIn("gpt-image-2-xhigh", ids)
+        self.assertNotIn("gpt-image-2.6-low", ids)
+        self.assertNotIn("gpt-image-2.6-medium", ids)
+        self.assertNotIn("gpt-image-2.6-high", ids)
+        self.assertNotIn("gpt-image-2.6-xhigh", ids)
 
     def test_gpt_image_hidden_suffixes_select_thinking_backend_slug(self):
         backend = OpenAIBackendAPI()
         try:
-            self.assertEqual(backend._image_model_slug("gpt-image-2"), "gpt-5-5")
-            self.assertEqual(backend._image_model_slug("gpt-image-2-low"), "gpt-5-5-thinking")
-            self.assertEqual(backend._image_model_slug("gpt-image-2-medium"), "gpt-5-5-thinking")
-            self.assertEqual(backend._image_model_slug("gpt-image-2-high"), "gpt-5-5-thinking")
-            self.assertEqual(backend._image_model_slug("gpt-image-2-xhigh"), "gpt-5-5-thinking")
+            for suffix in ("", "-low", "-medium", "-high", "-xhigh"):
+                self.assertEqual(backend._image_model_slug(f"gpt-image-2.6{suffix}"), "gpt-6.1-sol-wm")
         finally:
             backend.close()
 
@@ -544,17 +536,41 @@ class ModelListTests(unittest.TestCase):
             with mock.patch.object(backend.session, "post", side_effect=fake_post):
                 requirements = ChatRequirements(token="requirements-token")
                 self.assertEqual(
-                    backend._prepare_image_conversation("draw", requirements, "gpt-image-2-high"),
+                    backend._prepare_image_conversation("draw", requirements, "gpt-image-2.6-high"),
                     "ct-1",
                 )
-                backend._start_image_generation("draw", requirements, "ct-1", "gpt-image-2-high")
+                backend._start_image_generation("draw", requirements, "ct-1", "gpt-image-2.6-high")
         finally:
             backend.close()
 
-        self.assertEqual(payloads[0]["model"], "gpt-5-5-thinking")
+        self.assertEqual(payloads[0]["model"], "gpt-6.1-sol-wm")
         self.assertEqual(payloads[0]["thinking_effort"], "extended")
-        self.assertEqual(payloads[1]["model"], "gpt-5-5-thinking")
+        self.assertEqual(payloads[1]["model"], "gpt-6.1-sol-wm")
         self.assertEqual(payloads[1]["thinking_effort"], "extended")
+
+    def test_plain_image_model_sends_default_high_in_prepare_and_generation(self):
+        backend = OpenAIBackendAPI()
+        payloads: list[dict] = []
+
+        def fake_post(*_args, **kwargs):
+            payloads.append(kwargs["json"])
+            return FakeResponse({"conduit_token": "ct-1"})
+
+        try:
+            with (
+                mock.patch.dict(config.data, {"image_model_routing": {}}),
+                mock.patch.object(backend.session, "post", side_effect=fake_post),
+            ):
+                requirements = ChatRequirements(token="requirements-token")
+                backend._prepare_image_conversation("draw", requirements, "gpt-image-2.6")
+                backend._start_image_generation("draw", requirements, "ct-1", "gpt-image-2.6")
+        finally:
+            backend.close()
+
+        self.assertEqual(len(payloads), 2)
+        for payload in payloads:
+            self.assertEqual(payload["model"], "gpt-6.1-sol-wm")
+            self.assertEqual(payload["thinking_effort"], "extended")
 
     def test_list_models_function(self):
         """测试直接调用服务层获取模型列表。"""
@@ -569,9 +585,9 @@ class ModelListTests(unittest.TestCase):
             "object": "list",
             "data": [
                 {"id": "auto", "object": "model"},
-                {"id": "gpt-5.6-luna", "object": "model"},
-                {"id": "gpt-5.6-terra", "object": "model"},
-                {"id": "gpt-5.6-sol", "object": "model"},
+                {"id": "gpt-6.1-sol", "object": "model"},
+                {"id": "gpt-6.1-terra", "object": "model"},
+                {"id": "gpt-6.1-sol", "object": "model"},
             ],
         }
 
